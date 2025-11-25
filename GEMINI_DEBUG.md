@@ -20,7 +20,7 @@ cat .env
 
 Deve mostrar:
 ```
-GEMINI_API_KEY=AIzaSyBtGOuNqMmk_kTY5ybIUYxnpzQobv0wxUM
+GEMINI_API_KEY=
 ```
 
 ### 3. Solução Temporária: Usar Chave Diretamente
@@ -32,7 +32,7 @@ Se o .env não estiver funcionando, você pode temporariamente usar a chave dire
 No arquivo `lib/services/gemini_service.dart`, substitua:
 
 ```dart
-final apiKey = dotenv.env['GEMINI_API_KEY'] ?? 'AIzaSyBtGOuNqMmk_kTY5ybIUYxnpzQobv0wxUM';
+final apiKey = dotenv.env['GEMINI_API_KEY'] ?? '';
 ```
 
 ### 4. Reiniciar o App Completamente
@@ -61,7 +61,7 @@ dietapro/
 
 O arquivo deve ter exatamente:
 ```
-GEMINI_API_KEY=AIzaSyBtGOuNqMmk_kTY5ybIUYxnpzQobv0wxUM
+GEMINI_API_KEY=
 ```
 
 Sem espaços antes ou depois do `=`, sem aspas, sem quebras de linha extras.
