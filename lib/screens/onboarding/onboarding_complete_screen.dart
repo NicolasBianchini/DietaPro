@@ -1,14 +1,74 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
+import '../home_screen.dart';
 
-class OnboardingCompleteScreen extends StatelessWidget {
+class OnboardingCompleteScreen extends StatefulWidget {
   final UserProfile userProfile;
 
   const OnboardingCompleteScreen({
     super.key,
     required this.userProfile,
   });
+
+  @override
+  State<OnboardingCompleteScreen> createState() => _OnboardingCompleteScreenState();
+}
+
+class _OnboardingCompleteScreenState extends State<OnboardingCompleteScreen> {
+  bool _isSaving = false;
+  final _firestoreService = FirestoreService();
+
+  Future<void> _handleComplete() async {
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      // Salvar perfil no Firestore
+      final userId = await _firestoreService.saveUserProfile(widget.userProfile);
+      
+      // Atualizar o perfil com o ID retornado
+      final savedProfile = UserProfile(
+        id: userId,
+        email: widget.userProfile.email,
+        name: widget.userProfile.name,
+        gender: widget.userProfile.gender,
+        dateOfBirth: widget.userProfile.dateOfBirth,
+        height: widget.userProfile.height,
+        weight: widget.userProfile.weight,
+        activityLevel: widget.userProfile.activityLevel,
+        goal: widget.userProfile.goal,
+        createdAt: widget.userProfile.createdAt ?? DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      if (mounted) {
+        // Navegar para a tela inicial do app
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => HomeScreen(userProfile: savedProfile),
+          ),
+          (route) => false, // Remove todas as rotas anteriores
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao salvar perfil: ${e.toString().replaceFirst('Exception: ', '')}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -47,26 +107,26 @@ class OnboardingCompleteScreen extends StatelessWidget {
               ),
               const SizedBox(height: 48),
               // Resumo do perfil
-              _ProfileSummaryCard(userProfile: userProfile),
+              _ProfileSummaryCard(userProfile: widget.userProfile),
               const SizedBox(height: 48),
               // Botão para continuar
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () {
-                    // TODO: Navegar para a tela principal do app
-                    // Por enquanto, apenas mostra uma mensagem
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Perfil salvo com sucesso!'),
-                        backgroundColor: AppTheme.primaryColor,
-                      ),
-                    );
-                  },
+                  onPressed: _isSaving ? null : _handleComplete,
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
-                  child: const Text('Começar a usar o DietaPro'),
+                  child: _isSaving
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Text('Começar a usar o DietaPro'),
                 ),
               ),
               const SizedBox(height: 24),
@@ -117,6 +177,8 @@ class _ProfileSummaryCard extends StatelessWidget {
     switch (userProfile.goal) {
       case Goal.loseWeight:
         return 'Perder Peso';
+      case Goal.gainWeight:
+        return 'Ganhar Peso';
       case Goal.gainMuscle:
         return 'Ganhar Massa Muscular';
       case Goal.maintain:

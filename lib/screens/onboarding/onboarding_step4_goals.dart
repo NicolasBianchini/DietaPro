@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 
 class OnboardingStep4Goals extends StatefulWidget {
@@ -27,7 +28,7 @@ class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
     _selectedGoal = widget.userProfile.goal;
   }
 
-  void _handleComplete() {
+  Future<void> _handleComplete() async {
     if (_selectedGoal != null) {
       final updatedProfile = UserProfile(
         id: widget.userProfile.id,
@@ -42,7 +43,29 @@ class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
         createdAt: widget.userProfile.createdAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
       );
-      widget.onComplete(updatedProfile);
+
+      // Salvar no Firestore
+      try {
+        final firestoreService = FirestoreService();
+        final userId = await firestoreService.saveUserProfile(updatedProfile);
+        final savedProfile = UserProfile(
+          id: userId,
+          email: updatedProfile.email,
+          name: updatedProfile.name,
+          gender: updatedProfile.gender,
+          dateOfBirth: updatedProfile.dateOfBirth,
+          height: updatedProfile.height,
+          weight: updatedProfile.weight,
+          activityLevel: updatedProfile.activityLevel,
+          goal: updatedProfile.goal,
+          createdAt: updatedProfile.createdAt,
+          updatedAt: updatedProfile.updatedAt,
+        );
+        widget.onComplete(savedProfile);
+      } catch (e) {
+        // Se houver erro, continua mesmo assim
+        widget.onComplete(updatedProfile);
+      }
     }
   }
 
@@ -75,6 +98,20 @@ class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
             onTap: () {
               setState(() {
                 _selectedGoal = Goal.loseWeight;
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          _GoalOption(
+            goal: Goal.gainWeight,
+            title: 'Ganhar Peso',
+            description: 'Aumentar o peso corporal de forma saudável',
+            icon: Icons.trending_up_outlined,
+            color: Colors.green,
+            isSelected: _selectedGoal == Goal.gainWeight,
+            onTap: () {
+              setState(() {
+                _selectedGoal = Goal.gainWeight;
               });
             },
           ),
@@ -141,7 +178,7 @@ class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
-                  onPressed: _selectedGoal != null ? _handleComplete : null,
+                  onPressed: _selectedGoal != null ? () => _handleComplete() : null,
                   child: const Text('Finalizar'),
                 ),
               ),

@@ -14,6 +14,7 @@ enum ActivityLevel {
 
 enum Goal {
   loseWeight, // Perder peso
+  gainWeight, // Ganhar peso
   gainMuscle, // Ganhar massa muscular
   maintain, // Manutenção
   eatBetter, // Comer melhor
@@ -70,31 +71,44 @@ class UserProfile {
   // Converter para Map (útil para salvar no Firebase/Firestore)
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
+      if (id != null) 'id': id,
       'email': email,
       'name': name,
-      'gender': gender?.name,
-      'dateOfBirth': dateOfBirth?.toIso8601String(),
-      'height': height,
-      'weight': weight,
-      'activityLevel': activityLevel?.name,
-      'goal': goal?.name,
-      'createdAt': createdAt?.toIso8601String(),
-      'updatedAt': updatedAt?.toIso8601String(),
+      if (gender != null) 'gender': gender!.name,
+      if (dateOfBirth != null) 'dateOfBirth': dateOfBirth!.toIso8601String(),
+      if (height != null) 'height': height,
+      if (weight != null) 'weight': weight,
+      if (activityLevel != null) 'activityLevel': activityLevel!.name,
+      if (goal != null) 'goal': goal!.name,
+      if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
+      if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
     };
   }
 
-  // Criar a partir de Map
+  // Criar a partir de Map (compatível com Firestore)
   factory UserProfile.fromMap(Map<String, dynamic> map) {
+    // Converter Timestamp do Firestore para DateTime se necessário
+    DateTime? parseTimestamp(dynamic value) {
+      if (value == null) return null;
+      if (value is DateTime) return value;
+      if (value is String) return DateTime.parse(value);
+      // Se for Timestamp do Firestore, converter
+      try {
+        return (value as dynamic).toDate();
+      } catch (e) {
+        return null;
+      }
+    }
+
     return UserProfile(
-      id: map['id'],
+      id: map['id'] ?? map['id'],
       email: map['email'] ?? '',
       name: map['name'] ?? '',
       gender: map['gender'] != null ? Gender.values.firstWhere(
         (e) => e.name == map['gender'],
         orElse: () => Gender.other,
       ) : null,
-      dateOfBirth: map['dateOfBirth'] != null ? DateTime.parse(map['dateOfBirth']) : null,
+      dateOfBirth: parseTimestamp(map['dateOfBirth']),
       height: map['height']?.toDouble(),
       weight: map['weight']?.toDouble(),
       activityLevel: map['activityLevel'] != null ? ActivityLevel.values.firstWhere(
@@ -103,8 +117,8 @@ class UserProfile {
       goal: map['goal'] != null ? Goal.values.firstWhere(
         (e) => e.name == map['goal'],
       ) : null,
-      createdAt: map['createdAt'] != null ? DateTime.parse(map['createdAt']) : null,
-      updatedAt: map['updatedAt'] != null ? DateTime.parse(map['updatedAt']) : null,
+      createdAt: parseTimestamp(map['createdAt']),
+      updatedAt: parseTimestamp(map['updatedAt']),
     );
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 
 class OnboardingStep1BasicInfo extends StatefulWidget {
@@ -71,7 +72,7 @@ class _OnboardingStep1BasicInfoState extends State<OnboardingStep1BasicInfo> {
     return age;
   }
 
-  void _handleNext() {
+  Future<void> _handleNext() async {
     if (_formKey.currentState!.validate() && _selectedGender != null && _selectedDateOfBirth != null) {
       final updatedProfile = UserProfile(
         id: widget.userProfile.id,
@@ -83,10 +84,34 @@ class _OnboardingStep1BasicInfoState extends State<OnboardingStep1BasicInfo> {
         weight: widget.userProfile.weight,
         activityLevel: widget.userProfile.activityLevel,
         goal: widget.userProfile.goal,
-        createdAt: widget.userProfile.createdAt,
+        createdAt: widget.userProfile.createdAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
       );
-      widget.onNext(updatedProfile);
+
+      // Salvar no Firestore após preencher informações básicas
+      try {
+        final firestoreService = FirestoreService();
+        final userId = await firestoreService.saveUserProfile(updatedProfile);
+        // Atualizar o perfil com o ID retornado
+        final savedProfile = UserProfile(
+          id: userId,
+          email: updatedProfile.email,
+          name: updatedProfile.name,
+          gender: updatedProfile.gender,
+          dateOfBirth: updatedProfile.dateOfBirth,
+          height: updatedProfile.height,
+          weight: updatedProfile.weight,
+          activityLevel: updatedProfile.activityLevel,
+          goal: updatedProfile.goal,
+          createdAt: updatedProfile.createdAt,
+          updatedAt: updatedProfile.updatedAt,
+        );
+        widget.onNext(savedProfile);
+      } catch (e) {
+        // Se houver erro ao salvar, continua mesmo assim
+        // O perfil será salvo novamente no final
+        widget.onNext(updatedProfile);
+      }
     }
   }
 
@@ -243,7 +268,7 @@ class _OnboardingStep1BasicInfoState extends State<OnboardingStep1BasicInfo> {
             const SizedBox(height: 40),
             // Botão Continuar
             ElevatedButton(
-              onPressed: _handleNext,
+              onPressed: () => _handleNext(),
               child: const Text('Continuar'),
             ),
           ],

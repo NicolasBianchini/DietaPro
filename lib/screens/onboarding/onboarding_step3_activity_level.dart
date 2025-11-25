@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 
 class OnboardingStep3ActivityLevel extends StatefulWidget {
@@ -27,7 +28,7 @@ class _OnboardingStep3ActivityLevelState extends State<OnboardingStep3ActivityLe
     _selectedActivityLevel = widget.userProfile.activityLevel;
   }
 
-  void _handleNext() {
+  Future<void> _handleNext() async {
     if (_selectedActivityLevel != null) {
       final updatedProfile = UserProfile(
         id: widget.userProfile.id,
@@ -39,10 +40,32 @@ class _OnboardingStep3ActivityLevelState extends State<OnboardingStep3ActivityLe
         weight: widget.userProfile.weight,
         activityLevel: _selectedActivityLevel,
         goal: widget.userProfile.goal,
-        createdAt: widget.userProfile.createdAt,
+        createdAt: widget.userProfile.createdAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
       );
-      widget.onNext(updatedProfile);
+
+      // Salvar no Firestore
+      try {
+        final firestoreService = FirestoreService();
+        final userId = await firestoreService.saveUserProfile(updatedProfile);
+        final savedProfile = UserProfile(
+          id: userId,
+          email: updatedProfile.email,
+          name: updatedProfile.name,
+          gender: updatedProfile.gender,
+          dateOfBirth: updatedProfile.dateOfBirth,
+          height: updatedProfile.height,
+          weight: updatedProfile.weight,
+          activityLevel: updatedProfile.activityLevel,
+          goal: updatedProfile.goal,
+          createdAt: updatedProfile.createdAt,
+          updatedAt: updatedProfile.updatedAt,
+        );
+        widget.onNext(savedProfile);
+      } catch (e) {
+        // Se houver erro, continua mesmo assim
+        widget.onNext(updatedProfile);
+      }
     }
   }
 
@@ -150,7 +173,7 @@ class _OnboardingStep3ActivityLevelState extends State<OnboardingStep3ActivityLe
               Expanded(
                 flex: 2,
                 child: ElevatedButton(
-                  onPressed: _selectedActivityLevel != null ? _handleNext : null,
+                  onPressed: _selectedActivityLevel != null ? () => _handleNext() : null,
                   child: const Text('Continuar'),
                 ),
               ),

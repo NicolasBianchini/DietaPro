@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../services/firestore_service.dart';
+import '../models/user_profile.dart';
 import 'login_screen.dart';
 import 'onboarding/onboarding_wrapper.dart';
 
@@ -47,24 +49,56 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _isLoading = true;
       });
 
-      // Simular chamada de API
-      await Future.delayed(const Duration(seconds: 1));
+      try {
+        final firestoreService = FirestoreService();
+        final email = _emailController.text.trim();
+        final name = _nameController.text.trim();
 
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        // Verificar se o email já está cadastrado
+        final existingUser = await firestoreService.getUserProfileByEmail(email);
+        if (existingUser != null) {
+          throw Exception('Este email já está cadastrado. Faça login ou use outro email.');
+        }
 
-        // TODO: Implementar lógica de registro real
-        // Navegar para o onboarding após registro
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => OnboardingWrapper(
-              email: _emailController.text.trim(),
-              name: _nameController.text.trim(),
-            ),
-          ),
+        // Criar perfil inicial no Firestore
+        final userProfile = UserProfile(
+          email: email,
+          name: name,
+          createdAt: DateTime.now(),
         );
+
+        await firestoreService.saveUserProfile(userProfile);
+
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+
+          // Navegar para o onboarding após registro
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => OnboardingWrapper(
+                email: email,
+                name: name,
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+
+          // Mostrar erro ao usuário
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(e.toString().replaceFirst('Exception: ', '')),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
       }
     }
   }

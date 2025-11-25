@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../services/firestore_service.dart';
+import '../models/user_profile.dart';
 import 'register_screen.dart';
 import 'onboarding/onboarding_wrapper.dart';
+import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -31,27 +34,61 @@ class _LoginScreenState extends State<LoginScreen> {
         _isLoading = true;
       });
 
-      // Simular chamada de API
-      await Future.delayed(const Duration(seconds: 1));
+      try {
+        final firestoreService = FirestoreService();
+        final email = _emailController.text.trim();
 
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        // Buscar perfil do usuário no Firestore pelo email
+        final userProfile = await firestoreService.getUserProfileByEmail(email);
 
-        // TODO: Implementar lógica de autenticação real
-        // Por enquanto, vamos assumir que o usuário precisa fazer onboarding
-        // Em produção, verificar se o perfil já está completo
-        
-        // Navegar para o onboarding
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => OnboardingWrapper(
-              email: _emailController.text.trim(),
-              name: 'Usuário', // Em produção, buscar do backend
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+
+          if (userProfile == null) {
+            // Usuário não encontrado
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Nenhum usuário encontrado com este email. Crie uma conta primeiro.'),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          } else if (!userProfile.isComplete) {
+            // Perfil incompleto, ir para onboarding
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => OnboardingWrapper(
+                  email: email,
+                  name: userProfile.name,
+                ),
+              ),
+            );
+          } else {
+            // Perfil completo, ir para home
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                builder: (_) => HomeScreen(userProfile: userProfile),
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+
+          // Mostrar erro ao usuário
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao fazer login: ${e.toString().replaceFirst('Exception: ', '')}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
             ),
-          ),
-        );
+          );
+        }
       }
     }
   }

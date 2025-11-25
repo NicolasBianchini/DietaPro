@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/user_profile.dart';
+import '../../services/firestore_service.dart';
 import '../../theme/app_theme.dart';
 
 class OnboardingStep2PhysicalData extends StatefulWidget {
@@ -42,7 +43,7 @@ class _OnboardingStep2PhysicalDataState extends State<OnboardingStep2PhysicalDat
     super.dispose();
   }
 
-  void _handleNext() {
+  Future<void> _handleNext() async {
     if (_formKey.currentState!.validate()) {
       final height = double.tryParse(_heightController.text);
       final weight = double.tryParse(_weightController.text);
@@ -65,11 +66,32 @@ class _OnboardingStep2PhysicalDataState extends State<OnboardingStep2PhysicalDat
         weight: weightInKg,
         activityLevel: widget.userProfile.activityLevel,
         goal: widget.userProfile.goal,
-        createdAt: widget.userProfile.createdAt,
+        createdAt: widget.userProfile.createdAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
       );
 
-      widget.onNext(updatedProfile);
+      // Salvar no Firestore
+      try {
+        final firestoreService = FirestoreService();
+        final userId = await firestoreService.saveUserProfile(updatedProfile);
+        final savedProfile = UserProfile(
+          id: userId,
+          email: updatedProfile.email,
+          name: updatedProfile.name,
+          gender: updatedProfile.gender,
+          dateOfBirth: updatedProfile.dateOfBirth,
+          height: updatedProfile.height,
+          weight: updatedProfile.weight,
+          activityLevel: updatedProfile.activityLevel,
+          goal: updatedProfile.goal,
+          createdAt: updatedProfile.createdAt,
+          updatedAt: updatedProfile.updatedAt,
+        );
+        widget.onNext(savedProfile);
+      } catch (e) {
+        // Se houver erro, continua mesmo assim
+        widget.onNext(updatedProfile);
+      }
     }
   }
 
@@ -201,7 +223,7 @@ class _OnboardingStep2PhysicalDataState extends State<OnboardingStep2PhysicalDat
                 Expanded(
                   flex: 2,
                   child: ElevatedButton(
-                    onPressed: _handleNext,
+                    onPressed: () => _handleNext(),
                     child: const Text('Continuar'),
                   ),
                 ),
