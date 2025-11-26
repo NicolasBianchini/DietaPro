@@ -40,6 +40,7 @@ class _OnboardingCompleteScreenState extends State<OnboardingCompleteScreen> {
         weight: widget.userProfile.weight,
         activityLevel: widget.userProfile.activityLevel,
         goal: widget.userProfile.goal,
+        mealsPerDay: widget.userProfile.mealsPerDay,
         createdAt: widget.userProfile.createdAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
       );

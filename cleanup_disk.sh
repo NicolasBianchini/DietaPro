@@ -12,10 +12,21 @@ flutter clean
 rm -rf build/
 echo "✅ Build do Flutter limpo"
 
-# 2. Limpar cache do Xcode DerivedData
-echo "🍎 Limpando cache do Xcode..."
+# 2. Limpar cache do Xcode DerivedData (pode liberar vários GB)
+echo "🍎 Limpando cache do Xcode DerivedData..."
+if [ -d ~/Library/Developer/Xcode/DerivedData ]; then
+    BEFORE=$(du -sh ~/Library/Developer/Xcode/DerivedData 2>/dev/null | cut -f1 || echo "0")
 rm -rf ~/Library/Developer/Xcode/DerivedData/*
-echo "✅ Cache do Xcode limpo"
+    echo "✅ Cache do Xcode limpo (liberado: $BEFORE)"
+else
+    echo "⚠️  DerivedData não encontrado"
+fi
+
+# 2.1 Limpar cache do Xcode (outros caches)
+echo "🍎 Limpando outros caches do Xcode..."
+rm -rf ~/Library/Developer/Xcode/Archives/* 2>/dev/null || true
+rm -rf ~/Library/Caches/com.apple.dt.Xcode/* 2>/dev/null || true
+echo "✅ Outros caches do Xcode limpos"
 
 # 3. Limpar cache do CocoaPods
 echo "📱 Limpando cache do CocoaPods..."
