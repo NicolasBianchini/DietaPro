@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
+import '../services/auth_service.dart';
 import '../models/user_profile.dart';
 import 'login_screen.dart';
 import 'onboarding/onboarding_wrapper.dart';
@@ -50,24 +51,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
 
       try {
+        final authService = AuthService();
         final firestoreService = FirestoreService();
         final email = _emailController.text.trim();
         final name = _nameController.text.trim();
+        final password = _passwordController.text;
 
-        // Verificar se o email já está cadastrado
-        final existingUser = await firestoreService.getUserProfileByEmail(email);
-        if (existingUser != null) {
-          throw Exception('Este email já está cadastrado. Faça login ou use outro email.');
-        }
-
-        // Criar perfil inicial no Firestore
-        final userProfile = UserProfile(
+        // Criar conta no Firebase Auth
+        final userCredential = await authService.createUserWithEmailAndPassword(
           email: email,
+          password: password,
           name: name,
+        );
+
+        // O AuthService já salva o perfil inicial, mas vamos garantir
+        // que o perfil está salvo com o ID correto do Firebase Auth
+        if (userCredential.user?.uid != null) {
+          final userProfile = UserProfile(
+            id: userCredential.user!.uid,
+            email: email,
+            name: name,
           createdAt: DateTime.now(),
         );
 
         await firestoreService.saveUserProfile(userProfile);
+        }
 
         if (mounted) {
           setState(() {

@@ -1,16 +1,212 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
+import '../models/user_profile.dart';
+import '../models/food_item.dart';
+import '../services/firestore_service.dart';
 
 class MealsListScreen extends StatefulWidget {
-  const MealsListScreen({super.key});
+  final UserProfile? userProfile;
+
+  const MealsListScreen({
+    super.key,
+    this.userProfile,
+  });
 
   @override
   State<MealsListScreen> createState() => _MealsListScreenState();
 }
 
 class _MealsListScreenState extends State<MealsListScreen> {
-  // Dados mockados - em produção, viriam de um serviço/backend
+  final FirestoreService _firestoreService = FirestoreService();
+  List<Map<String, dynamic>> _meals = [];
+  bool _isLoading = true;
+  String? _selectedDietId;
+  List<Map<String, dynamic>> _availableDiets = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMealPlans();
+  }
+
+  Future<void> _loadMealPlans() async {
+    if (widget.userProfile == null || widget.userProfile!.id == null) {
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      final mealPlans = await _firestoreService.getUserMealPlans(widget.userProfile!.id!);
+      
+      if (mealPlans.isNotEmpty) {
+        setState(() {
+          _availableDiets = mealPlans;
+          _selectedDietId = mealPlans.first['id'] as String;
+          _loadMealsFromPlan(mealPlans.first);
+        });
+      } else {
+        setState(() {
+          _meals = [];
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao carregar planos alimentares: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  void _loadMealsFromPlan(Map<String, dynamic> mealPlan) {
+    try {
+      final mealsData = mealPlan['meals'] as Map<String, dynamic>?;
+      if (mealsData == null) {
+        debugPrint('⚠️ mealsData é null no plano: ${mealPlan['dietName']}');
+        setState(() {
+          _meals = [];
+          _isLoading = false;
+        });
+        return;
+      }
+      
+      debugPrint('📋 Carregando plano: ${mealPlan['dietName']}');
+      debugPrint('🍽️ Refeições disponíveis no plano: ${mealsData.keys.toList()}');
+      debugPrint('👤 mealsPerDay do usuário: ${widget.userProfile?.mealsPerDayOrDefault ?? 5}');
+
+      final List<Map<String, dynamic>> mealsList = [];
+      
+      // Obter o número de refeições do perfil do usuário
+      final mealsPerDay = widget.userProfile?.mealsPerDayOrDefault ?? 5;
+      
+      // Mapear mealType para informações de exibição
+      final mealTypeMap = {
+        'breakfast': {'name': 'Café da Manhã', 'time': '08:00', 'icon': Icons.wb_sunny_outlined},
+        'morning_snack': {'name': 'Lanche da Manhã', 'time': '10:30', 'icon': Icons.cookie_outlined},
+        'lunch': {'name': 'Almoço', 'time': '13:00', 'icon': Icons.lunch_dining_outlined},
+        'afternoon_snack': {'name': 'Lanche da Tarde', 'time': '16:00', 'icon': Icons.cookie_outlined},
+        'dinner': {'name': 'Jantar', 'time': '19:00', 'icon': Icons.dinner_dining_outlined},
+        'evening_snack': {'name': 'Ceia', 'time': '21:00', 'icon': Icons.nightlight_outlined},
+        'late_snack': {'name': 'Lanche Noturno', 'time': '23:00', 'icon': Icons.bedtime_outlined},
+      };
+
+      // Definir a ordem das refeições baseada no número de refeições por dia
+      final mealConfigs = <int, List<String>>{
+        3: ['breakfast', 'lunch', 'dinner'],
+        4: ['breakfast', 'lunch', 'afternoon_snack', 'dinner'],
+        5: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner'],
+        6: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner', 'evening_snack'],
+        7: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner', 'evening_snack', 'late_snack'],
+      };
+      
+      // Obter a ordem de refeições correspondente ao mealsPerDay
+      final mealOrder = mealConfigs[mealsPerDay] ?? mealConfigs[5]!;
+      
+      // Processar apenas as refeições que correspondem ao mealsPerDay
+      for (final mealType in mealOrder) {
+        if (mealsData.containsKey(mealType)) {
+          final mealFoodsData = mealsData[mealType] as List<dynamic>;
+          if (mealFoodsData.isNotEmpty) {
+            final mealInfo = mealTypeMap[mealType] ?? {'name': mealType, 'time': '12:00', 'icon': Icons.restaurant};
+            
+            // Converter MealFood para formato da lista
+            final foods = mealFoodsData.map((mfData) {
+              // Verificar se mfData é um Map antes de tentar fazer fromMap
+              if (mfData is! Map<String, dynamic>) {
+                // Se não for Map, pode ser que já esteja no formato esperado
+                return {
+                  'name': mfData['name'] ?? 'Alimento desconhecido',
+                  'quantity': '${(mfData['quantity'] ?? 0).toStringAsFixed(0)}g',
+                  'calories': ((mfData['calories'] ?? 0) as num).toInt(),
+                };
+              }
+              
+              try {
+                final mealFood = MealFood.fromMap(mfData as Map<String, dynamic>);
+                return {
+                  'name': mealFood.food.name,
+                  'quantity': '${mealFood.quantity.toStringAsFixed(0)}g',
+                  'calories': mealFood.totalCalories.round(),
+                };
+              } catch (e) {
+                // Se falhar ao fazer fromMap, tentar extrair dados diretamente
+                final foodData = mfData['food'] as Map<String, dynamic>?;
+                if (foodData != null) {
+                  return {
+                    'name': foodData['name'] ?? 'Alimento desconhecido',
+                    'quantity': '${(mfData['quantity'] ?? 0).toStringAsFixed(0)}g',
+                    'calories': ((foodData['calories'] ?? 0) * ((mfData['quantity'] ?? 100) / 100)).round(),
+                  };
+                }
+                return {
+                  'name': 'Alimento desconhecido',
+                  'quantity': '0g',
+                  'calories': 0,
+                };
+              }
+            }).toList();
+
+            // Calcular total de calorias da refeição
+            final totalCalories = foods.fold<int>(0, (sum, food) => sum + (food['calories'] as int));
+
+            mealsList.add({
+              'id': '${mealType}_${_selectedDietId}',
+              'name': mealInfo['name'] as String,
+              'time': mealInfo['time'] as String,
+              'calories': totalCalories,
+              'foods': foods,
+              'isCompleted': false,
+              'icon': mealInfo['icon'] as IconData,
+            });
+          }
+        }
+      }
+
+      debugPrint('✅ Refeições processadas: ${mealsList.length}');
+      for (var meal in mealsList) {
+        debugPrint('  - ${meal['name']}: ${meal['foods'].length} alimentos, ${meal['calories']} kcal');
+      }
+
+      setState(() {
+        _meals = mealsList;
+        _isLoading = false;
+      });
+    } catch (e, stackTrace) {
+      debugPrint('❌ Erro ao processar plano alimentar: $e');
+      debugPrint('Stack trace: $stackTrace');
+      
+      setState(() {
+        _isLoading = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao processar plano alimentar: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  // Dados mockados antigos (removidos - agora carregamos do Firestore)
+  /*
   final List<Map<String, dynamic>> _meals = [
     {
       'id': '1',
@@ -78,6 +274,7 @@ class _MealsListScreenState extends State<MealsListScreen> {
       'icon': Icons.dinner_dining_outlined,
     },
   ];
+  */
 
   @override
   Widget build(BuildContext context) {
@@ -100,8 +297,56 @@ class _MealsListScreenState extends State<MealsListScreen> {
       appBar: AppBar(
         title: const Text('Refeições do Dia'),
         elevation: 0,
+        actions: [
+          if (_availableDiets.isNotEmpty)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              onSelected: (dietId) {
+                setState(() {
+                  _selectedDietId = dietId;
+                  final selectedDiet = _availableDiets.firstWhere((d) => d['id'] == dietId);
+                  _loadMealsFromPlan(selectedDiet);
+                });
+              },
+              itemBuilder: (context) => _availableDiets.map((diet) {
+                return PopupMenuItem<String>(
+                  value: diet['id'] as String,
+                  child: Text(diet['dietName'] as String? ?? 'Dieta sem nome'),
+                );
+              }).toList(),
+            ),
+        ],
       ),
-      body: Column(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _meals.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.restaurant_menu,
+                        size: 64,
+                        color: Colors.grey.shade400,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Nenhum plano alimentar encontrado',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Colors.grey.shade600,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Crie um plano na Calculadora de Dieta',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Colors.grey.shade500,
+                            ),
+                      ),
+                    ],
+                  ),
+                )
+              : Column(
         children: [
           // Resumo do dia
           Container(

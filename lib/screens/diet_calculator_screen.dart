@@ -6,6 +6,7 @@ import '../models/food_item.dart';
 import '../utils/nutrition_calculator.dart';
 import '../utils/food_database.dart';
 import '../services/gemini_service.dart';
+import '../services/firestore_service.dart';
 
 class DietCalculatorScreen extends StatefulWidget {
   final UserProfile? userProfile;
@@ -29,36 +30,21 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
   Map<String, dynamic>? _nutritionData;
   bool _isCalculated = false;
 
-  // Alimentos por refeição
-  final Map<String, List<MealFood>> _meals = {
-    'breakfast': [],
-    'morning_snack': [],
-    'lunch': [],
-    'afternoon_snack': [],
-    'dinner': [],
-  };
+  // Alimentos por refeição - será inicializado dinamicamente baseado no mealsPerDay
+  late Map<String, List<MealFood>> _meals;
 
   // Controllers de busca por refeição
-  final Map<String, TextEditingController> _searchControllers = {
-    'breakfast': TextEditingController(),
-    'morning_snack': TextEditingController(),
-    'lunch': TextEditingController(),
-    'afternoon_snack': TextEditingController(),
-    'dinner': TextEditingController(),
-  };
+  final Map<String, TextEditingController> _searchControllers = {};
 
   // Resultados de busca por refeição
-  final Map<String, List<FoodItem>> _searchResults = {
-    'breakfast': [],
-    'morning_snack': [],
-    'lunch': [],
-    'afternoon_snack': [],
-    'dinner': [],
-  };
+  final Map<String, List<FoodItem>> _searchResults = {};
 
   @override
   void initState() {
     super.initState();
+    // Inicializar refeições baseado no mealsPerDay do usuário
+    _initializeMeals();
+    
     // Preencher com dados do perfil se disponível
     if (widget.userProfile != null) {
       if (widget.userProfile!.height != null) {
@@ -74,6 +60,34 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       entry.value.addListener(() {
         _performSearch(entry.key, entry.value.text);
       });
+    }
+  }
+
+  /// Inicializa as refeições baseado no número de refeições por dia do usuário
+  void _initializeMeals() {
+    final mealsPerDay = widget.userProfile?.mealsPerDayOrDefault ?? 5;
+    
+    // Mapeamento de refeições por número
+    final mealConfigs = <int, List<String>>{
+      3: ['breakfast', 'lunch', 'dinner'],
+      4: ['breakfast', 'lunch', 'afternoon_snack', 'dinner'],
+      5: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner'],
+      6: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner', 'evening_snack'],
+      7: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner', 'evening_snack', 'late_snack'],
+    };
+    
+    // Obter lista de refeições correspondente ao mealsPerDay
+    final mealTypes = mealConfigs[mealsPerDay] ?? mealConfigs[5]!;
+    
+    // Inicializar mapas
+    _meals = {};
+    _searchControllers.clear();
+    _searchResults.clear();
+    
+    for (final mealType in mealTypes) {
+      _meals[mealType] = [];
+      _searchControllers[mealType] = TextEditingController();
+      _searchResults[mealType] = [];
     }
   }
 
@@ -177,6 +191,9 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       final goalText = _getGoalText(widget.userProfile!.goal!);
 
       // Gerar plano alimentar usando TACO
+      // Usar o número de refeições do perfil do usuário (padrão: 5)
+      final mealsPerDay = widget.userProfile!.mealsPerDayOrDefault;
+      
       final mealPlanData = await GeminiService.instance.generateMealPlanFromTACO(
         dailyCalories: (nutritionData['calories'] as double).round(),
         protein: nutritionData['protein'] as double,
@@ -186,7 +203,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
         age: widget.userProfile!.age!,
         activityLevel: activityText,
         goal: goalText,
-        mealsPerDay: 5,
+        mealsPerDay: mealsPerDay,
       );
 
       // Processar e adicionar alimentos às refeições
@@ -201,6 +218,20 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
           for (var mealData in meals) {
             final mealType = mealData['mealType'] as String;
             final foods = mealData['foods'] as List<dynamic>;
+            
+            // Garantir que a refeição existe no mapa (caso a IA retorne uma refeição não esperada)
+            if (!_meals.containsKey(mealType)) {
+              _meals[mealType] = [];
+              if (!_searchControllers.containsKey(mealType)) {
+                _searchControllers[mealType] = TextEditingController();
+                _searchControllers[mealType]!.addListener(() {
+                  _performSearch(mealType, _searchControllers[mealType]!.text);
+                });
+              }
+              if (!_searchResults.containsKey(mealType)) {
+                _searchResults[mealType] = [];
+              }
+            }
             
             for (var foodData in foods) {
               final foodItem = FoodItem(
@@ -219,9 +250,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
                 mealType: mealType,
               );
               
-              if (_meals.containsKey(mealType)) {
-                _meals[mealType]!.add(mealFood);
-              }
+              _meals[mealType]!.add(mealFood);
             }
           }
         });
@@ -472,6 +501,133 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       'carbs': carbs,
       'fats': fats,
     };
+  }
+
+  Future<void> _saveMealPlan() async {
+    if (widget.userProfile == null || widget.userProfile!.id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Erro: Usuário não identificado'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    if (_dietNameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Por favor, insira o nome da dieta'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    if (_nutritionData == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Por favor, calcule as necessidades nutricionais primeiro'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    // Verificar se há pelo menos uma refeição com alimentos
+    bool hasMeals = false;
+    for (final mealList in _meals.values) {
+      if (mealList.isNotEmpty) {
+        hasMeals = true;
+        break;
+      }
+    }
+
+    if (!hasMeals) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Adicione pelo menos um alimento às refeições'),
+          backgroundColor: AppTheme.errorColor,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Mostrar loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Salvando plano alimentar...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final firestoreService = FirestoreService();
+      
+      // Filtrar apenas refeições que têm alimentos antes de salvar
+      final mealsToSave = <String, List<MealFood>>{};
+      _meals.forEach((mealType, mealFoods) {
+        if (mealFoods.isNotEmpty) {
+          mealsToSave[mealType] = mealFoods;
+        }
+      });
+      
+      // Salvar o plano alimentar
+      await firestoreService.saveMealPlan(
+        userId: widget.userProfile!.id!,
+        dietName: _dietNameController.text.trim(),
+        description: _descriptionController.text.trim().isEmpty 
+            ? null 
+            : _descriptionController.text.trim(),
+        nutritionData: _nutritionData!,
+        meals: mealsToSave,
+        createdAt: DateTime.now(),
+      );
+
+      if (mounted) {
+        Navigator.pop(context); // Fechar dialog de loading
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Plano alimentar salvo com sucesso!'),
+            backgroundColor: AppTheme.primaryColor,
+            duration: Duration(seconds: 2),
+          ),
+        );
+
+        // Voltar para a tela anterior após um breve delay
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            Navigator.pop(context);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Fechar dialog de loading
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao salvar plano alimentar: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -748,15 +904,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
               // Seções de Refeições
               if (_isCalculated) ...[
                 const SizedBox(height: 32),
-                _buildMealSection('breakfast', 'Café da Manhã', Icons.wb_sunny_outlined),
-                const SizedBox(height: 24),
-                _buildMealSection('morning_snack', 'Lanche da Manhã', Icons.cookie_outlined),
-                const SizedBox(height: 24),
-                _buildMealSection('lunch', 'Almoço', Icons.lunch_dining_outlined),
-                const SizedBox(height: 24),
-                _buildMealSection('afternoon_snack', 'Lanche da Tarde', Icons.cookie_outlined),
-                const SizedBox(height: 24),
-                _buildMealSection('dinner', 'Jantar', Icons.dinner_dining_outlined),
+                ..._buildMealSections(),
                 const SizedBox(height: 32),
                 // Resumo Total do Plano
                 _buildTotalPlanSummary(),
@@ -765,14 +913,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Plano alimentar salvo com sucesso!'),
-                          backgroundColor: AppTheme.primaryColor,
-                        ),
-                      );
-                    },
+                    onPressed: _saveMealPlan,
                     icon: const Icon(Icons.check, color: Colors.white),
                     label: const Text(
                       'Confirmar Plano Alimentar',
@@ -792,6 +933,88 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
         ),
       ),
     );
+  }
+
+  /// Retorna as seções de refeições baseadas no número de refeições do usuário
+  List<Widget> _buildMealSections() {
+    final mealsPerDay = widget.userProfile?.mealsPerDayOrDefault ?? 5;
+    final sections = <Widget>[];
+    
+    // Mapeamento de refeições por número
+    final mealConfigs = <int, List<Map<String, dynamic>>>{
+      3: [
+        {'type': 'breakfast', 'title': 'Café da Manhã', 'icon': Icons.wb_sunny_outlined},
+        {'type': 'lunch', 'title': 'Almoço', 'icon': Icons.lunch_dining_outlined},
+        {'type': 'dinner', 'title': 'Jantar', 'icon': Icons.dinner_dining_outlined},
+      ],
+      4: [
+        {'type': 'breakfast', 'title': 'Café da Manhã', 'icon': Icons.wb_sunny_outlined},
+        {'type': 'lunch', 'title': 'Almoço', 'icon': Icons.lunch_dining_outlined},
+        {'type': 'afternoon_snack', 'title': 'Lanche da Tarde', 'icon': Icons.cookie_outlined},
+        {'type': 'dinner', 'title': 'Jantar', 'icon': Icons.dinner_dining_outlined},
+      ],
+      5: [
+        {'type': 'breakfast', 'title': 'Café da Manhã', 'icon': Icons.wb_sunny_outlined},
+        {'type': 'morning_snack', 'title': 'Lanche da Manhã', 'icon': Icons.cookie_outlined},
+        {'type': 'lunch', 'title': 'Almoço', 'icon': Icons.lunch_dining_outlined},
+        {'type': 'afternoon_snack', 'title': 'Lanche da Tarde', 'icon': Icons.cookie_outlined},
+        {'type': 'dinner', 'title': 'Jantar', 'icon': Icons.dinner_dining_outlined},
+      ],
+      6: [
+        {'type': 'breakfast', 'title': 'Café da Manhã', 'icon': Icons.wb_sunny_outlined},
+        {'type': 'morning_snack', 'title': 'Lanche da Manhã', 'icon': Icons.cookie_outlined},
+        {'type': 'lunch', 'title': 'Almoço', 'icon': Icons.lunch_dining_outlined},
+        {'type': 'afternoon_snack', 'title': 'Lanche da Tarde', 'icon': Icons.cookie_outlined},
+        {'type': 'dinner', 'title': 'Jantar', 'icon': Icons.dinner_dining_outlined},
+        {'type': 'evening_snack', 'title': 'Ceia', 'icon': Icons.nightlight_outlined},
+      ],
+      7: [
+        {'type': 'breakfast', 'title': 'Café da Manhã', 'icon': Icons.wb_sunny_outlined},
+        {'type': 'morning_snack', 'title': 'Lanche da Manhã', 'icon': Icons.cookie_outlined},
+        {'type': 'lunch', 'title': 'Almoço', 'icon': Icons.lunch_dining_outlined},
+        {'type': 'afternoon_snack', 'title': 'Lanche da Tarde', 'icon': Icons.cookie_outlined},
+        {'type': 'dinner', 'title': 'Jantar', 'icon': Icons.dinner_dining_outlined},
+        {'type': 'evening_snack', 'title': 'Ceia', 'icon': Icons.nightlight_outlined},
+        {'type': 'late_snack', 'title': 'Lanche Noturno', 'icon': Icons.bedtime_outlined},
+      ],
+    };
+    
+    // Obter configuração de refeições (padrão: 5)
+    final config = mealConfigs[mealsPerDay] ?? mealConfigs[5]!;
+    
+    // Inicializar refeições que não existem no mapa
+    for (final meal in config) {
+      final mealType = meal['type'] as String;
+      if (!_meals.containsKey(mealType)) {
+        _meals[mealType] = [];
+      }
+      if (!_searchControllers.containsKey(mealType)) {
+        _searchControllers[mealType] = TextEditingController();
+        _searchControllers[mealType]!.addListener(() {
+          _performSearch(mealType, _searchControllers[mealType]!.text);
+        });
+      }
+      if (!_searchResults.containsKey(mealType)) {
+        _searchResults[mealType] = [];
+      }
+    }
+    
+    // Construir widgets das seções
+    for (int i = 0; i < config.length; i++) {
+      final meal = config[i];
+      sections.add(
+        _buildMealSection(
+          meal['type'] as String,
+          meal['title'] as String,
+          meal['icon'] as IconData,
+        ),
+      );
+      if (i < config.length - 1) {
+        sections.add(const SizedBox(height: 24));
+      }
+    }
+    
+    return sections;
   }
 
   Widget _buildMealSection(String mealType, String title, IconData icon) {

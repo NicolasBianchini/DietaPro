@@ -21,11 +21,13 @@ class OnboardingStep4Goals extends StatefulWidget {
 
 class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
   Goal? _selectedGoal;
+  int _mealsPerDay = 5; // Padrão: 5 refeições
 
   @override
   void initState() {
     super.initState();
     _selectedGoal = widget.userProfile.goal;
+    _mealsPerDay = widget.userProfile.mealsPerDay ?? 5;
   }
 
   Future<void> _handleComplete() async {
@@ -40,6 +42,7 @@ class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
         weight: widget.userProfile.weight,
         activityLevel: widget.userProfile.activityLevel,
         goal: _selectedGoal,
+        mealsPerDay: _mealsPerDay,
         createdAt: widget.userProfile.createdAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
       );
@@ -58,6 +61,7 @@ class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
           weight: updatedProfile.weight,
           activityLevel: updatedProfile.activityLevel,
           goal: updatedProfile.goal,
+          mealsPerDay: updatedProfile.mealsPerDay,
           createdAt: updatedProfile.createdAt,
           updatedAt: updatedProfile.updatedAt,
         );
@@ -156,6 +160,70 @@ class _OnboardingStep4GoalsState extends State<OnboardingStep4Goals> {
                 _selectedGoal = Goal.eatBetter;
               });
             },
+          ),
+          const SizedBox(height: 40),
+          // Seleção de número de refeições
+          Text(
+            'Quantas refeições você faz por dia?',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '$_mealsPerDay refeições por dia',
+                    style: Theme.of(context).textTheme.bodyLarge,
+                  ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline),
+                      onPressed: _mealsPerDay > 3
+                          ? () {
+                              setState(() {
+                                _mealsPerDay--;
+                              });
+                            }
+                          : null,
+                      color: AppTheme.primaryColor,
+                    ),
+                    Container(
+                      width: 40,
+                      alignment: Alignment.center,
+                      child: Text(
+                        '$_mealsPerDay',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline),
+                      onPressed: _mealsPerDay < 7
+                          ? () {
+                              setState(() {
+                                _mealsPerDay++;
+                              });
+                            }
+                          : null,
+                      color: AppTheme.primaryColor,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 40),
           // Botões

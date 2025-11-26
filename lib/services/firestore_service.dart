@@ -108,16 +108,45 @@ class FirestoreService {
   /// Busca todos os planos alimentares de um usuário
   Future<List<Map<String, dynamic>>> getUserMealPlans(String userId) async {
     try {
+      // Remover orderBy para evitar necessidade de índice composto
+      // Ordenaremos em memória depois
       final querySnapshot = await _firestore
           .collection('meal_plans')
           .where('userId', isEqualTo: userId)
-          .orderBy('createdAt', descending: true)
           .get();
 
-      return querySnapshot.docs.map((doc) => {
+      final plans = querySnapshot.docs.map((doc) {
+        final data = doc.data();
+        return <String, dynamic>{
         'id': doc.id,
-        ...doc.data(),
+          ...data,
+        };
       }).toList();
+
+      // Ordenar por createdAt em memória (mais recente primeiro)
+      plans.sort((a, b) {
+        final aCreated = a['createdAt'];
+        final bCreated = b['createdAt'];
+        
+        // Se ambos são Timestamps, comparar diretamente
+        if (aCreated != null && bCreated != null) {
+          if (aCreated is Timestamp && bCreated is Timestamp) {
+            return bCreated.compareTo(aCreated);
+          }
+          // Se são DateTime, converter
+          if (aCreated is DateTime && bCreated is DateTime) {
+            return bCreated.compareTo(aCreated);
+          }
+        }
+        
+        // Se um é null, colocar no final
+        if (aCreated == null) return 1;
+        if (bCreated == null) return -1;
+        
+        return 0;
+      });
+
+      return plans;
     } catch (e) {
       throw Exception('Erro ao buscar planos alimentares: $e');
     }

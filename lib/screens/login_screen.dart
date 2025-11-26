@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
-import '../models/user_profile.dart';
 import 'register_screen.dart';
 import 'onboarding/onboarding_wrapper.dart';
 import 'home_screen.dart';

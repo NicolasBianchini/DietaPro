@@ -5,6 +5,7 @@ import '../models/user_profile.dart';
 import 'login_screen.dart';
 import 'diet_calculator_screen.dart';
 import 'meals_list_screen.dart';
+import 'edit_profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserProfile? userProfile;
@@ -108,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _getCurrentScreen() {
     switch (_currentIndex) {
       case 0:
-        return const MealsListScreen();
+        return MealsListScreen(userProfile: widget.userProfile);
       case 1:
         return SafeArea(
           child: RefreshIndicator(
@@ -252,12 +253,22 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildProfileMenuItem(
               icon: Icons.person_outline,
               title: 'Editar Perfil',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Funcionalidade em desenvolvimento'),
+              onTap: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => EditProfileScreen(userProfile: widget.userProfile!),
                   ),
                 );
+                // Se o perfil foi atualizado, recarregar a tela
+                if (result != null && mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => HomeScreen(userProfile: result as UserProfile),
+                  ),
+                );
+                }
               },
             ),
             const SizedBox(height: 16),
@@ -921,7 +932,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => const MealsListScreen(),
+                      builder: (_) => MealsListScreen(userProfile: widget.userProfile),
                     ),
                   );
                 },

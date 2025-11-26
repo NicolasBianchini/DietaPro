@@ -30,6 +30,7 @@ class UserProfile {
   double? weight; // em kg
   ActivityLevel? activityLevel;
   Goal? goal;
+  int? mealsPerDay; // Número de refeições por dia (padrão: 5)
   DateTime? createdAt;
   DateTime? updatedAt;
 
@@ -43,6 +44,7 @@ class UserProfile {
     this.weight,
     this.activityLevel,
     this.goal,
+    this.mealsPerDay,
     this.createdAt,
     this.updatedAt,
   });
@@ -80,6 +82,7 @@ class UserProfile {
       if (weight != null) 'weight': weight,
       if (activityLevel != null) 'activityLevel': activityLevel!.name,
       if (goal != null) 'goal': goal!.name,
+      if (mealsPerDay != null) 'mealsPerDay': mealsPerDay,
       if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
     };
@@ -117,6 +120,7 @@ class UserProfile {
       goal: map['goal'] != null ? Goal.values.firstWhere(
         (e) => e.name == map['goal'],
       ) : null,
+      mealsPerDay: map['mealsPerDay']?.toInt(),
       createdAt: parseTimestamp(map['createdAt']),
       updatedAt: parseTimestamp(map['updatedAt']),
     );
@@ -129,7 +133,11 @@ class UserProfile {
         height != null &&
         weight != null &&
         activityLevel != null &&
-        goal != null;
+        goal != null &&
+        mealsPerDay != null;
   }
+  
+  // Obter número de refeições (padrão: 5 se não definido)
+  int get mealsPerDayOrDefault => mealsPerDay ?? 5;
 }
 

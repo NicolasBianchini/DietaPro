@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
 
 class GeminiService {
   static GeminiService? _instance;
@@ -13,6 +14,173 @@ class GeminiService {
   static GeminiService get instance {
     _instance ??= GeminiService._();
     return _instance!;
+  }
+
+  /// Lista de modelos para tentar em ordem de preferência (fallback)
+  static const List<String> _fallbackModels = [
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro-latest',
+    'gemini-1.5-pro',
+    'gemini-pro',
+    'gemini-2.0-flash-exp',
+  ];
+
+  /// Verifica se um modelo deve ser usado (filtra previews e experimentais problemáticos)
+  bool _isModelValid(String modelName) {
+    // Filtrar modelos de preview, experimentais e versões específicas problemáticas
+    final invalidPatterns = [
+      RegExp(r'-preview-', caseSensitive: false),
+      RegExp(r'-exp$', caseSensitive: false),
+      RegExp(r'-experimental', caseSensitive: false),
+      RegExp(r'gemini-2\.5', caseSensitive: false), // Modelos 2.5 podem ter problemas
+      RegExp(r'-\d{2}-\d{2}$'), // Versões com data (ex: -03-25)
+    ];
+    
+    for (final pattern in invalidPatterns) {
+      if (pattern.hasMatch(modelName)) {
+        debugPrint('⚠️ Modelo filtrado (preview/experimental): $modelName');
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  /// Prioriza modelos estáveis conhecidos
+  List<String> _prioritizeModels(List<String> models) {
+    // Modelos estáveis conhecidos em ordem de preferência
+    final stableModels = [
+      'gemini-1.5-flash-latest',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro-latest',
+      'gemini-1.5-pro',
+      'gemini-pro',
+    ];
+    
+    final prioritized = <String>[];
+    final others = <String>[];
+    
+    // Adicionar modelos estáveis primeiro
+    for (final stable in stableModels) {
+      if (models.contains(stable)) {
+        prioritized.add(stable);
+      }
+    }
+    
+    // Adicionar outros modelos válidos
+    for (final model in models) {
+      if (!prioritized.contains(model) && _isModelValid(model)) {
+        others.add(model);
+      }
+    }
+    
+    // Combinar: estáveis primeiro, depois outros válidos
+    return [...prioritized, ...others];
+  }
+
+  /// Lista os modelos disponíveis na API do Gemini
+  /// Retorna uma lista de nomes de modelos que suportam generateContent
+  Future<List<String>> listAvailableModels(String apiKey) async {
+    try {
+      final url = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey'
+      );
+      
+      debugPrint('📡 Buscando modelos disponíveis na API...');
+      final response = await http.get(url);
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final models = data['models'] as List<dynamic>? ?? [];
+        
+        final availableModels = <String>[];
+        
+        for (final model in models) {
+          final modelData = model as Map<String, dynamic>;
+          final name = modelData['name'] as String? ?? '';
+          final supportedMethods = modelData['supportedGenerationMethods'] as List<dynamic>? ?? [];
+          
+          // Filtrar apenas modelos que suportam generateContent
+          if (supportedMethods.contains('generateContent')) {
+            // Remover o prefixo "models/" se existir
+            final modelName = name.replaceFirst(RegExp(r'^models/'), '');
+            
+            // Filtrar modelos inválidos (preview, experimentais, etc)
+            if (_isModelValid(modelName)) {
+              availableModels.add(modelName);
+              debugPrint('✅ Modelo disponível: $modelName');
+            }
+          }
+        }
+        
+        // Priorizar modelos estáveis
+        final prioritizedModels = _prioritizeModels(availableModels);
+        
+        debugPrint('📋 Total de modelos disponíveis: ${prioritizedModels.length}');
+        if (prioritizedModels.isEmpty) {
+          debugPrint('⚠️ Nenhum modelo válido encontrado, usando lista de fallback');
+          return _fallbackModels;
+        }
+        
+        return prioritizedModels;
+      } else {
+        debugPrint('❌ Erro ao buscar modelos: ${response.statusCode} - ${response.body}');
+        return _fallbackModels;
+      }
+    } catch (e) {
+      debugPrint('❌ Erro ao listar modelos: $e');
+      debugPrint('⚠️ Usando lista de fallback');
+      return _fallbackModels;
+    }
+  }
+
+  /// Tenta inicializar o modelo com diferentes nomes até encontrar um que funcione
+  Future<void> _initializeModelWithFallback(String apiKey) async {
+    Exception? lastException;
+    
+    // Primeiro, tentar buscar os modelos disponíveis da API
+    List<String> modelsToTry = _fallbackModels;
+    try {
+      debugPrint('🔍 Buscando modelos disponíveis na API...');
+      final availableModels = await listAvailableModels(apiKey);
+      if (availableModels.isNotEmpty) {
+        modelsToTry = availableModels;
+        debugPrint('✅ Usando ${modelsToTry.length} modelos da API');
+      } else {
+        debugPrint('⚠️ Nenhum modelo encontrado na API, usando lista de fallback');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Erro ao buscar modelos da API, usando lista de fallback: $e');
+    }
+    
+    for (final modelName in modelsToTry) {
+      try {
+        debugPrint('🔄 Tentando modelo: $modelName');
+        _model = GenerativeModel(
+          model: modelName,
+          apiKey: apiKey,
+        );
+        // Testar se o modelo funciona fazendo uma chamada simples
+        // Mas não vamos fazer isso na inicialização para não gastar tokens
+        // Apenas criar o modelo já valida se ele existe
+        debugPrint('✅ Modelo $modelName inicializado com sucesso');
+        return;
+      } catch (e) {
+        debugPrint('❌ Modelo $modelName falhou: $e');
+        lastException = e is Exception ? e : Exception(e.toString());
+        continue;
+      }
+    }
+    
+    // Se nenhum modelo funcionou, lançar o último erro
+    throw Exception(
+      'Nenhum modelo do Gemini está disponível. '
+      'Último erro: ${lastException?.toString() ?? "Desconhecido"}\n\n'
+      'Modelos tentados: ${modelsToTry.join(", ")}\n\n'
+      'Verifique se sua chave API está correta e se você tem acesso aos modelos do Gemini.\n\n'
+      'Use listAvailableModels() para ver quais modelos estão disponíveis para sua conta.'
+    );
   }
 
   /// Inicializa o serviço do Gemini com a chave API
@@ -46,12 +214,6 @@ class GeminiService {
       
       // Verificar se a chave é válida
       if (apiKey == null || apiKey.isEmpty || apiKey == 'sua_chave_api_aqui') {
-        // Solução temporária: usar chave diretamente se .env não funcionar
-        // ⚠️ ATENÇÃO: Remova isso em produção e use apenas .env
-        apiKey = 'AIzaSyBtGOuNqMmk_kTY5ybIUYxnpzQobv0wxUM';
-        debugPrint('⚠️ Usando chave API diretamente (fallback)');
-        
-        if (apiKey == null || apiKey.isEmpty) {
           debugPrint('❌ Chave API inválida ou não encontrada');
           debugPrint('📝 Variáveis disponíveis no dotenv: ${dotenv.env.keys.toList()}');
           throw Exception(
@@ -62,37 +224,16 @@ class GeminiService {
             '3. Obtenha sua chave em: https://makersuite.google.com/app/apikey\n'
             '4. Pare o app completamente e reinicie (não use hot reload)'
           );
-        }
       }
 
       debugPrint('✅ Inicializando Gemini com chave: ${apiKey.substring(0, 10)}...');
-      _model = GenerativeModel(
-        model: 'gemini-pro',
-        apiKey: apiKey,
-      );
+      await _initializeModelWithFallback(apiKey);
 
       _isInitialized = true;
       debugPrint('✅ Gemini Service inicializado com sucesso');
     } catch (e) {
       debugPrint('❌ Erro ao inicializar Gemini: $e');
-      
-      // Se falhou, tentar usar a chave diretamente como último recurso
-      try {
-        debugPrint('🔄 Tentando inicializar com chave direta...');
-        final fallbackKey = 'AIzaSyBtGOuNqMmk_kTY5ybIUYxnpzQobv0wxUM';
-        _model = GenerativeModel(
-          model: 'gemini-pro',
-          apiKey: fallbackKey,
-        );
-        _isInitialized = true;
-        debugPrint('✅ Gemini Service inicializado com chave direta (fallback)');
-      } catch (e2) {
-        debugPrint('❌ Erro ao usar fallback: $e2');
-        if (e.toString().contains('GEMINI_API_KEY') || e.toString().contains('Chave API')) {
           rethrow;
-        }
-        throw Exception('Erro ao inicializar Gemini Service: ${e.toString()}');
-      }
     }
   }
 
@@ -124,6 +265,8 @@ class GeminiService {
       }
     }
 
+    // Tentar gerar resposta, se falhar por modelo inválido, tentar outro modelo
+    for (int attempt = 0; attempt < 2; attempt++) {
     try {
       final content = [Content.text(prompt)];
       final response = await _model.generateContent(content);
@@ -134,14 +277,60 @@ class GeminiService {
       
       return response.text!;
     } catch (e) {
-      if (e.toString().contains('API_KEY') || e.toString().contains('api key')) {
+        final errorString = e.toString();
+        
+        // Verificar se é erro de modelo não encontrado ou não suportado
+        if (errorString.contains('is not found') || 
+            errorString.contains('is not supported') ||
+            errorString.contains('not found for API version')) {
+          debugPrint('❌ Modelo atual não é suportado, tentando reinicializar com outro modelo...');
+          
+          // Resetar inicialização e tentar novamente
+          _isInitialized = false;
+          try {
+            // Obter a chave API
+            String? apiKey = dotenv.env['GEMINI_API_KEY'];
+            if (apiKey == null || apiKey.isEmpty) {
+              try {
+                await dotenv.load(fileName: '.env');
+                apiKey = dotenv.env['GEMINI_API_KEY'];
+              } catch (e) {
+                try {
+                  await dotenv.load();
+                  apiKey = dotenv.env['GEMINI_API_KEY'];
+                } catch (e2) {
+                  // Ignorar
+                }
+              }
+            }
+            
+            if (apiKey != null && apiKey.isNotEmpty && apiKey != 'sua_chave_api_aqui') {
+              await _initializeModelWithFallback(apiKey);
+              _isInitialized = true;
+              debugPrint('✅ Reinicializado com novo modelo, tentando novamente...');
+              continue; // Tentar novamente com o novo modelo
+            }
+          } catch (e2) {
+            debugPrint('❌ Erro ao reinicializar: $e2');
+          }
+        }
+        
+        // Se não for erro de modelo ou se já tentou 2 vezes, lançar o erro
+        if (attempt == 1 || !errorString.contains('is not found') && 
+            !errorString.contains('is not supported') &&
+            !errorString.contains('not found for API version')) {
+          if (errorString.contains('API_KEY') || errorString.contains('api key')) {
         throw Exception(
           'Erro de autenticação com a API do Gemini. '
           'Verifique se a chave API está correta no arquivo .env'
         );
       }
       throw Exception('Erro ao gerar resposta do Gemini: $e');
+        }
     }
+    }
+    
+    throw Exception('Erro ao gerar resposta do Gemini após múltiplas tentativas');
   }
 
   /// Gera sugestões de plano alimentar baseado no perfil do usuário
@@ -359,5 +548,42 @@ Regras:
 
   /// Verifica se o serviço está inicializado
   bool get isInitialized => _isInitialized;
+
+  /// Método público para listar modelos disponíveis (útil para debug)
+  /// Retorna uma lista de nomes de modelos que suportam generateContent
+  Future<List<String>> getAvailableModels() async {
+    try {
+      String? apiKey = dotenv.env['GEMINI_API_KEY'];
+      
+      if (apiKey == null || apiKey.isEmpty) {
+        try {
+          await dotenv.load(fileName: '.env');
+          apiKey = dotenv.env['GEMINI_API_KEY'];
+        } catch (e) {
+          try {
+            await dotenv.load();
+            apiKey = dotenv.env['GEMINI_API_KEY'];
+          } catch (e2) {
+            // Ignorar erro
+          }
+        }
+      }
+      
+      if (apiKey == null || apiKey.isEmpty || apiKey == 'sua_chave_api_aqui') {
+        throw Exception(
+          'Chave API do Gemini não configurada.\n\n'
+          'Por favor:\n'
+          '1. Certifique-se de que o arquivo .env existe na raiz do projeto\n'
+          '2. Adicione: GEMINI_API_KEY=sua_chave_aqui\n'
+          '3. Obtenha sua chave em: https://makersuite.google.com/app/apikey'
+        );
+      }
+      
+      return await listAvailableModels(apiKey);
+    } catch (e) {
+      debugPrint('❌ Erro ao obter modelos disponíveis: $e');
+      rethrow;
+    }
+  }
 }
 
