@@ -36,8 +36,27 @@ class _LoginScreenState extends State<LoginScreen> {
       try {
         final firestoreService = FirestoreService();
         final email = _emailController.text.trim();
+        final password = _passwordController.text;
 
-        // Buscar perfil do usuário no Firestore pelo email
+        // ⚠️ TEMPORÁRIO: Login sem validação de senha
+        // TODO: Configurar Firebase Auth corretamente e reativar validação
+        // 
+        // Para configurar o Firebase Auth:
+        // 1. Acesse https://console.firebase.google.com
+        // 2. Vá em Authentication > Sign-in method
+        // 3. Habilite "Email/Password"
+        // 4. Execute: flutter pub run flutter_launcher_icons
+        // 5. Descomente o código abaixo:
+        
+        /*
+        final authService = AuthService();
+        await authService.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        */
+
+        // Buscar perfil do usuário no Firestore
         final userProfile = await firestoreService.getUserProfileByEmail(email);
 
         if (mounted) {
@@ -46,7 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
           });
 
           if (userProfile == null) {
-            // Usuário não encontrado
+            // Usuário não encontrado no Firestore
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('Nenhum usuário encontrado com este email. Crie uma conta primeiro.'),
@@ -83,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Erro ao fazer login: ${e.toString().replaceFirst('Exception: ', '')}'),
-              backgroundColor: Colors.red,
+              backgroundColor: AppTheme.errorColor,
               duration: const Duration(seconds: 4),
             ),
           );

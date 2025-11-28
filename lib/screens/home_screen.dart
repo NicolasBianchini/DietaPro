@@ -263,9 +263,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     for (final meal in _todayMeals) {
       if (meal['isCompleted'] == true) {
+        // Adicionar calorias
+        _caloriesConsumed += (meal['calories'] as num?)?.toInt() ?? 0;
+        
         // Se há macros diretos na refeição, usar eles
         if (meal['protein'] != null || meal['carbs'] != null || meal['fats'] != null) {
-          _caloriesConsumed += meal['calories'] as int? ?? 0;
           _protein += (meal['protein'] as num?)?.toDouble() ?? 0.0;
           _carbs += (meal['carbs'] as num?)?.toDouble() ?? 0.0;
           _fats += (meal['fats'] as num?)?.toDouble() ?? 0.0;
@@ -274,27 +276,38 @@ class _HomeScreenState extends State<HomeScreen> {
         else if (meal['foods'] != null) {
           final foods = meal['foods'] as List<dynamic>;
           for (var foodData in foods) {
-            final quantity = (foodData['quantity'] as num?)?.toDouble() ?? 100.0;
-            final food = foodData['food'] as Map<String, dynamic>?;
-            
-            if (food != null) {
-              final baseCalories = (food['calories'] as num?)?.toDouble() ?? 0.0;
-              final baseProtein = (food['protein'] as num?)?.toDouble() ?? 0.0;
-              final baseCarbs = (food['carbs'] as num?)?.toDouble() ?? 0.0;
-              final baseFats = (food['fats'] as num?)?.toDouble() ?? 0.0;
-              
-              // Calcular valores proporcionais à quantidade
-              final multiplier = quantity / 100.0;
-              _caloriesConsumed += (baseCalories * multiplier).round();
-              _protein += baseProtein * multiplier;
-              _carbs += baseCarbs * multiplier;
-              _fats += baseFats * multiplier;
+            // Se o alimento já tem macros calculados, usar direto
+            if (foodData['protein'] != null || foodData['carbs'] != null || foodData['fats'] != null) {
+              _protein += (foodData['protein'] as num?)?.toDouble() ?? 0.0;
+              _carbs += (foodData['carbs'] as num?)?.toDouble() ?? 0.0;
+              _fats += (foodData['fats'] as num?)?.toDouble() ?? 0.0;
+            } 
+            // Caso contrário, tentar calcular a partir dos dados do alimento
+            else {
+              final food = foodData['food'] as Map<String, dynamic>?;
+              if (food != null) {
+                // Extrair quantidade (pode estar como "100g" ou 100)
+                var quantity = 100.0;
+                final quantityStr = foodData['quantity'];
+                if (quantityStr is num) {
+                  quantity = quantityStr.toDouble();
+                } else if (quantityStr is String) {
+                  final numStr = quantityStr.replaceAll(RegExp(r'[^0-9.]'), '');
+                  quantity = double.tryParse(numStr) ?? 100.0;
+                }
+                
+                final baseProtein = (food['protein'] as num?)?.toDouble() ?? 0.0;
+                final baseCarbs = (food['carbs'] as num?)?.toDouble() ?? 0.0;
+                final baseFats = (food['fats'] as num?)?.toDouble() ?? 0.0;
+                
+                // Calcular valores proporcionais à quantidade
+                final multiplier = quantity / 100.0;
+                _protein += baseProtein * multiplier;
+                _carbs += baseCarbs * multiplier;
+                _fats += baseFats * multiplier;
+              }
             }
           }
-        }
-        // Se não há nem macros nem alimentos, usar apenas calorias
-        else {
-          _caloriesConsumed += meal['calories'] as int? ?? 0;
         }
       }
     }

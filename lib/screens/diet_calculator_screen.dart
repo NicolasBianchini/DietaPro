@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/app_theme.dart';
@@ -46,6 +47,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
   // Restrições alimentares
   Set<String> _selectedRestrictions = {};
   final TextEditingController _customRestrictionsController = TextEditingController();
+  Timer? _restrictionsSaveTimer;
   
   // Lista de restrições alimentares comuns
   final List<String> _commonRestrictions = [
@@ -85,6 +87,9 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       if (widget.userProfile!.customDietaryRestrictions != null) {
         _customRestrictionsController.text = widget.userProfile!.customDietaryRestrictions!;
       }
+      
+      // Tentar carregar também da sub-coleção settings (local definitivo)
+      _loadDietaryRestrictionsFromSettings();
     }
 
     // Adicionar listeners para busca
@@ -93,6 +98,17 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
         _performSearch(entry.key, entry.value.text);
       });
     }
+    
+    // Listener para salvar restrições customizadas automaticamente (com delay)
+    _customRestrictionsController.addListener(() {
+      // Cancelar timer anterior se existir
+      _restrictionsSaveTimer?.cancel();
+      
+      // Criar novo timer de 2 segundos (salva só quando parar de digitar)
+      _restrictionsSaveTimer = Timer(const Duration(seconds: 2), () {
+        _saveDietaryRestrictionsToProfile();
+      });
+    });
 
     // Se há mealPlanId, carregar plano existente
     if (widget.mealPlanId != null) {
@@ -103,6 +119,11 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
   /// Inicializa as refeições baseado no número de refeições por dia do usuário
   void _initializeMeals() {
     final mealsPerDay = widget.userProfile?.mealsPerDayOrDefault ?? 5;
+    
+    print('\n📱 INICIALIZANDO CALCULADORA DE DIETA');
+    print('👤 Perfil: ${widget.userProfile?.name ?? "não definido"}');
+    print('📊 mealsPerDay: ${widget.userProfile?.mealsPerDay ?? "null"}');
+    print('📊 Usando: $mealsPerDay refeições\n');
     
     // Mapeamento de refeições por número
     final mealConfigs = <int, List<String>>{
@@ -130,6 +151,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
 
   @override
   void dispose() {
+    _restrictionsSaveTimer?.cancel();
     _dietNameController.dispose();
     _descriptionController.dispose();
     _heightController.dispose();
@@ -317,6 +339,13 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       // Gerar plano alimentar usando TACO
       // Usar o número de refeições do perfil do usuário (padrão: 5)
       final mealsPerDay = widget.userProfile!.mealsPerDayOrDefault;
+      
+      print('\n🍽️ ===== GERANDO PLANO COM IA =====');
+      print('👤 Perfil: ${widget.userProfile!.name}');
+      print('📊 mealsPerDay do perfil: ${widget.userProfile!.mealsPerDay}');
+      print('📊 mealsPerDayOrDefault: $mealsPerDay');
+      print('🤖 IA vai gerar $mealsPerDay refeições');
+      print('🍽️ ================================\n');
       
       final mealPlanData = await GeminiService.instance.generateMealPlanFromTACO(
         dailyCalories: (nutritionData['calories'] as double).round(),
@@ -628,6 +657,84 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
     };
   }
 
+  /// Carrega as restrições alimentares da sub-coleção settings
+  Future<void> _loadDietaryRestrictionsFromSettings() async {
+    if (widget.userProfile?.id == null) return;
+
+    try {
+      final firestoreService = FirestoreService();
+      final restrictions = await firestoreService.getUserDietaryRestrictions(widget.userProfile!.id!);
+      
+      if (mounted) {
+        setState(() {
+          if (restrictions['dietaryRestrictions'] != null) {
+            _selectedRestrictions = Set<String>.from(restrictions['dietaryRestrictions'] as List);
+          }
+          if (restrictions['customRestrictions'] != null) {
+            _customRestrictionsController.text = restrictions['customRestrictions'] as String;
+          }
+        });
+        
+        print('✅ Restrições carregadas da sub-coleção settings');
+      }
+    } catch (e) {
+      print('⚠️ Erro ao carregar restrições: $e');
+      // Não mostrar erro - continua com as restrições do perfil principal
+    }
+  }
+
+  /// Salva as restrições alimentares no perfil do usuário
+  Future<void> _saveDietaryRestrictionsToProfile() async {
+    if (widget.userProfile?.id == null) return;
+
+    try {
+      final firestoreService = FirestoreService();
+      
+      // Salvar no perfil principal (para backup)
+      final updatedProfile = UserProfile(
+        id: widget.userProfile!.id,
+        email: widget.userProfile!.email,
+        name: widget.userProfile!.name,
+        gender: widget.userProfile!.gender,
+        dateOfBirth: widget.userProfile!.dateOfBirth,
+        height: widget.userProfile!.height,
+        weight: widget.userProfile!.weight,
+        activityLevel: widget.userProfile!.activityLevel,
+        goal: widget.userProfile!.goal,
+        mealsPerDay: widget.userProfile!.mealsPerDay,
+        dietaryRestrictions: _selectedRestrictions.isNotEmpty 
+            ? _selectedRestrictions.toList() 
+            : null,
+        customDietaryRestrictions: _customRestrictionsController.text.trim().isEmpty 
+            ? null 
+            : _customRestrictionsController.text.trim(),
+        termsAccepted: widget.userProfile!.termsAccepted,
+        termsAcceptedAt: widget.userProfile!.termsAcceptedAt,
+        createdAt: widget.userProfile!.createdAt,
+        updatedAt: DateTime.now(),
+      );
+
+      await firestoreService.saveUserProfile(updatedProfile);
+      
+      // Também salvar na sub-coleção settings/dietary_restrictions
+      // (local onde o FirestoreService busca as restrições)
+      await firestoreService.saveUserDietaryRestrictions(
+        userId: widget.userProfile!.id!,
+        dietaryRestrictions: _selectedRestrictions.isNotEmpty 
+            ? _selectedRestrictions.toList() 
+            : [],
+        customRestrictions: _customRestrictionsController.text.trim().isEmpty 
+            ? null 
+            : _customRestrictionsController.text.trim(),
+      );
+      
+      print('✅ Restrições alimentares salvas no perfil');
+    } catch (e) {
+      print('❌ Erro ao salvar restrições: $e');
+      // Não mostrar erro ao usuário para não interromper o fluxo
+    }
+  }
+
   Future<void> _saveMealPlan() async {
     if (widget.userProfile == null || widget.userProfile!.id == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -704,11 +811,21 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       
       // Filtrar apenas refeições que têm alimentos antes de salvar
       final mealsToSave = <String, List<MealFood>>{};
+      debugPrint('\n🍽️ ===== SALVANDO PLANO: ${_dietNameController.text} =====');
+      debugPrint('📋 Total de refeições no mapa _meals: ${_meals.length}');
+      
       _meals.forEach((mealType, mealFoods) {
+        debugPrint('  - $mealType: ${mealFoods.length} alimentos');
         if (mealFoods.isNotEmpty) {
           mealsToSave[mealType] = mealFoods;
+          debugPrint('    ✅ SERÁ SALVA');
+        } else {
+          debugPrint('    ❌ VAZIA - NÃO SERÁ SALVA');
         }
       });
+      
+      debugPrint('📊 Total de refeições que serão salvas: ${mealsToSave.length}');
+      debugPrint('🍽️ ===== FIM =====\n');
       
       // Salvar ou atualizar o plano alimentar
       if (widget.mealPlanId != null) {
@@ -1742,6 +1859,9 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
                             _selectedRestrictions.remove(restriction);
                           }
                         });
+                        
+                        // Salvar automaticamente no perfil
+                        _saveDietaryRestrictionsToProfile();
                       },
                       selectedColor: AppTheme.primaryColor.withValues(alpha: 0.2),
                       checkmarkColor: AppTheme.primaryColor,

@@ -143,42 +143,63 @@ class _MealsListScreenState extends State<MealsListScreen> {
                   'name': mfData['name'] ?? 'Alimento desconhecido',
                   'quantity': '${(mfData['quantity'] ?? 0).toStringAsFixed(0)}g',
                   'calories': ((mfData['calories'] ?? 0) as num).toInt(),
+                  'protein': (mfData['protein'] ?? 0.0).toDouble(),
+                  'carbs': (mfData['carbs'] ?? 0.0).toDouble(),
+                  'fats': (mfData['fats'] ?? 0.0).toDouble(),
                 };
               }
               
               try {
                 final mealFood = MealFood.fromMap(mfData as Map<String, dynamic>);
+                final multiplier = mealFood.quantity / 100.0;
                 return {
                   'name': mealFood.food.name,
                   'quantity': '${mealFood.quantity.toStringAsFixed(0)}g',
                   'calories': mealFood.totalCalories.round(),
+                  'protein': mealFood.food.protein * multiplier,
+                  'carbs': mealFood.food.carbs * multiplier,
+                  'fats': mealFood.food.fats * multiplier,
                 };
               } catch (e) {
                 // Se falhar ao fazer fromMap, tentar extrair dados diretamente
                 final foodData = mfData['food'] as Map<String, dynamic>?;
                 if (foodData != null) {
+                  final quantity = (mfData['quantity'] ?? 100) as num;
+                  final multiplier = quantity / 100.0;
                   return {
                     'name': foodData['name'] ?? 'Alimento desconhecido',
-                    'quantity': '${(mfData['quantity'] ?? 0).toStringAsFixed(0)}g',
-                    'calories': ((foodData['calories'] ?? 0) * ((mfData['quantity'] ?? 100) / 100)).round(),
+                    'quantity': '${quantity.toStringAsFixed(0)}g',
+                    'calories': ((foodData['calories'] ?? 0) * multiplier).round(),
+                    'protein': ((foodData['protein'] ?? 0) as num).toDouble() * multiplier,
+                    'carbs': ((foodData['carbs'] ?? 0) as num).toDouble() * multiplier,
+                    'fats': ((foodData['fats'] ?? 0) as num).toDouble() * multiplier,
                   };
                 }
                 return {
                   'name': 'Alimento desconhecido',
                   'quantity': '0g',
                   'calories': 0,
+                  'protein': 0.0,
+                  'carbs': 0.0,
+                  'fats': 0.0,
                 };
               }
             }).toList();
 
-            // Calcular total de calorias da refeição
+            // Calcular totais da refeição
             final totalCalories = foods.fold<int>(0, (sum, food) => sum + (food['calories'] as int));
+            final totalProtein = foods.fold<double>(0.0, (sum, food) => sum + ((food['protein'] ?? 0.0) as num).toDouble());
+            final totalCarbs = foods.fold<double>(0.0, (sum, food) => sum + ((food['carbs'] ?? 0.0) as num).toDouble());
+            final totalFats = foods.fold<double>(0.0, (sum, food) => sum + ((food['fats'] ?? 0.0) as num).toDouble());
 
             mealsList.add({
               'id': '${mealType}_${_selectedDietId}',
               'name': mealInfo['name'] as String,
               'time': mealInfo['time'] as String,
               'calories': totalCalories,
+              'protein': totalProtein,
+              'carbs': totalCarbs,
+              'fats': totalFats,
               'foods': foods,
               'isCompleted': false,
               'icon': mealInfo['icon'] as IconData,
@@ -669,6 +690,16 @@ class _MealsListScreenState extends State<MealsListScreen> {
             if (savedMeal['isCompleted'] != null) {
               mealsList[i]['isCompleted'] = savedMeal['isCompleted'] as bool;
             }
+            // Carregar macronutrientes salvos
+            if (savedMeal['protein'] != null) {
+              mealsList[i]['protein'] = (savedMeal['protein'] as num).toDouble();
+            }
+            if (savedMeal['carbs'] != null) {
+              mealsList[i]['carbs'] = (savedMeal['carbs'] as num).toDouble();
+            }
+            if (savedMeal['fats'] != null) {
+              mealsList[i]['fats'] = (savedMeal['fats'] as num).toDouble();
+            }
           }
         }
       }
@@ -695,6 +726,9 @@ class _MealsListScreenState extends State<MealsListScreen> {
         'name': meal['name'] as String,
         'time': meal['time'] as String,
         'calories': meal['calories'] as int,
+        'protein': (meal['protein'] ?? 0.0) as double,
+        'carbs': (meal['carbs'] ?? 0.0) as double,
+        'fats': (meal['fats'] ?? 0.0) as double,
         'isCompleted': meal['isCompleted'] as bool,
         'foods': meal['foods'] as List<Map<String, dynamic>>,
       }).toList();
@@ -799,6 +833,28 @@ class _MealsListScreenState extends State<MealsListScreen> {
             _meals[i]['isCompleted'] != savedMeal['isCompleted']) {
           _meals[i]['isCompleted'] = savedMeal['isCompleted'] as bool;
           hasChanges = true;
+        }
+        // Sincronizar macronutrientes
+        if (savedMeal['protein'] != null) {
+          final protein = (savedMeal['protein'] as num).toDouble();
+          if (_meals[i]['protein'] != protein) {
+            _meals[i]['protein'] = protein;
+            hasChanges = true;
+          }
+        }
+        if (savedMeal['carbs'] != null) {
+          final carbs = (savedMeal['carbs'] as num).toDouble();
+          if (_meals[i]['carbs'] != carbs) {
+            _meals[i]['carbs'] = carbs;
+            hasChanges = true;
+          }
+        }
+        if (savedMeal['fats'] != null) {
+          final fats = (savedMeal['fats'] as num).toDouble();
+          if (_meals[i]['fats'] != fats) {
+            _meals[i]['fats'] = fats;
+            hasChanges = true;
+          }
         }
       }
     }

@@ -146,17 +146,63 @@ class _MealPlansListScreenState extends State<MealPlansListScreen> {
     return total;
   }
 
-  /// Conta o número real de refeições (apenas as que têm alimentos)
+  /// Conta o número real de refeições (apenas as que têm alimentos válidos)
   int _countMealsWithFoods(Map<String, dynamic> mealPlan) {
     final meals = mealPlan['meals'] as Map<String, dynamic>?;
-    if (meals == null) return 0;
+    final planName = mealPlan['dietName'] ?? 'sem nome';
+    
+    print('\n🔍 ===== CONTANDO REFEIÇÕES: $planName =====');
+    
+    if (meals == null) {
+      print('❌ meals é null!');
+      return 0;
+    }
+    
+    print('📋 Chaves no meals: ${meals.keys.toList()}');
     
     int count = 0;
     meals.forEach((mealType, mealFoods) {
-      if (mealFoods is List && mealFoods.isNotEmpty) {
-        count++;
+      print('  🍽️ $mealType:');
+      
+      if (mealFoods is List) {
+        print('    - É uma lista com ${mealFoods.length} itens');
+        
+        if (mealFoods.isEmpty) {
+          print('    ❌ Lista vazia - NÃO CONTAR');
+          return;
+        }
+        
+        // Verificar se há pelo menos um alimento válido na lista
+        bool hasValidFood = false;
+        for (int i = 0; i < mealFoods.length; i++) {
+          final mf = mealFoods[i];
+          if (mf is Map<String, dynamic>) {
+            final food = mf['food'] as Map<String, dynamic>?;
+            if (food != null && food.isNotEmpty) {
+              print('    ✅ Alimento $i: ${food['name']}');
+              hasValidFood = true;
+              break;
+            } else {
+              print('    ⚠️ Alimento $i: food é null ou vazio');
+            }
+          } else {
+            print('    ⚠️ Alimento $i: não é Map');
+          }
+        }
+        
+        if (hasValidFood) {
+          count++;
+          print('    ✅ CONTAR ESTA REFEIÇÃO (total até agora: $count)');
+        } else {
+          print('    ❌ Sem alimentos válidos - NÃO CONTAR');
+        }
+      } else {
+        print('    ❌ Não é uma lista (tipo: ${mealFoods.runtimeType})');
       }
     });
+    
+    print('📊 TOTAL DE REFEIÇÕES VÁLIDAS: $count');
+    print('🔍 ===== FIM =====\n');
     
     return count;
   }

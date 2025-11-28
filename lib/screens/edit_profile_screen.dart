@@ -62,6 +62,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _mealsPerDay = widget.userProfile.mealsPerDay ?? 5;
     _selectedRestrictions = Set<String>.from(widget.userProfile.dietaryRestrictions ?? []);
     _customRestrictionsController.text = widget.userProfile.customDietaryRestrictions ?? '';
+    
+    // Carregar restrições da sub-coleção settings (local definitivo)
+    _loadDietaryRestrictionsFromSettings();
+  }
+
+  /// Carrega as restrições alimentares da sub-coleção settings
+  Future<void> _loadDietaryRestrictionsFromSettings() async {
+    if (widget.userProfile.id == null) return;
+
+    try {
+      final restrictions = await _firestoreService.getUserDietaryRestrictions(widget.userProfile.id!);
+      
+      if (mounted) {
+        setState(() {
+          if (restrictions['dietaryRestrictions'] != null) {
+            _selectedRestrictions = Set<String>.from(restrictions['dietaryRestrictions'] as List);
+          }
+          if (restrictions['customRestrictions'] != null) {
+            _customRestrictionsController.text = restrictions['customRestrictions'] as String;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar restrições: $e');
+      // Continua com as restrições do perfil principal
+    }
   }
 
   @override
@@ -150,6 +176,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
 
       await _firestoreService.saveUserProfile(updatedProfile);
+      
+      // Também salvar na sub-coleção settings/dietary_restrictions
+      // (para sincronizar com a Calculadora de Dieta)
+      await _firestoreService.saveUserDietaryRestrictions(
+        userId: widget.userProfile.id!,
+        dietaryRestrictions: _selectedRestrictions.isNotEmpty 
+            ? _selectedRestrictions.toList() 
+            : [],
+        customRestrictions: _customRestrictionsController.text.trim().isEmpty 
+            ? null 
+            : _customRestrictionsController.text.trim(),
+      );
 
       if (mounted) {
         setState(() {

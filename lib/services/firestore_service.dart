@@ -190,25 +190,40 @@ class FirestoreService {
   }) async {
     try {
       final mealPlanRef = _firestore.collection('meal_plans').doc(mealPlanId);
+      
+      // Primeiro, buscar o documento atual para preservar campos não atualizados
+      final doc = await mealPlanRef.get();
+      if (!doc.exists) {
+        throw Exception('Plano alimentar não encontrado');
+      }
+      
+      final currentData = doc.data()!;
       final updateData = <String, dynamic>{
+        ...currentData, // Preservar dados existentes
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
       if (dietName != null) updateData['dietName'] = dietName;
       if (description != null) updateData['description'] = description;
       if (nutritionData != null) updateData['nutritionData'] = nutritionData;
+      
+      // IMPORTANTE: Substituir completamente as refeições (não fazer merge)
+      // Isso garante que refeições removidas sejam deletadas do Firestore
       if (meals != null) {
         final mealsMap = <String, List<Map<String, dynamic>>>{};
         meals.forEach((mealType, mealFoods) {
           mealsMap[mealType] = mealFoods.map((mf) => mf.toMap()).toList();
         });
-        updateData['meals'] = mealsMap;
+        updateData['meals'] = mealsMap; // Substituir completamente
       }
+      
       if (dietaryRestrictions != null) {
         updateData['dietaryRestrictions'] = dietaryRestrictions;
       }
 
-      await mealPlanRef.update(updateData);
+      // Usar set com merge: false para substituir completamente o documento
+      // mas preservar campos que não estamos atualizando
+      await mealPlanRef.set(updateData, SetOptions(merge: false));
     } catch (e) {
       throw Exception('Erro ao atualizar plano alimentar: $e');
     }

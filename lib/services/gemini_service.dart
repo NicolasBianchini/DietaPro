@@ -446,12 +446,44 @@ Perfil do usuário:
 - Nível de atividade: $activityLevel
 - Objetivo: $goal
 
-Necessidades nutricionais diárias:
+🔬 CONSIDERAÇÕES ESPECÍFICAS POR GÊNERO:
+
+${gender.toLowerCase().contains('fem') || gender.toLowerCase().contains('mulher') ? '''
+⚠️ PERFIL FEMININO - NECESSIDADES NUTRICIONAIS ESPECÍFICAS:
+1. FERRO: Priorize alimentos ricos em ferro (carnes vermelhas magras, feijões, lentilhas, folhas verdes escuras) devido ao ciclo menstrual
+2. CÁLCIO: Inclua alimentos com cálcio (vegetais verde-escuros, sardinha, gergelim) para saúde óssea
+3. ÁCIDO FÓLICO: Importante especialmente em idade fértil - inclua vegetais folhosos, leguminosas
+4. VITAMINAS DO COMPLEXO B: Fundamentais para energia e metabolismo hormonal
+5. PROTEÍNAS: Distribua bem ao longo do dia, com foco em manutenção muscular
+6. GORDURAS SAUDÁVEIS: Importantes para saúde hormonal (abacate, castanhas, azeite)
+7. HIDRATAÇÃO: Fundamental para metabolismo e retenção de líquidos
+
+ATENÇÃO: Mulheres geralmente têm metabolismo 5-10% mais lento que homens e podem precisar de maior aporte de nutrientes específicos mesmo com menor necessidade calórica total.
+''' : '''
+⚠️ PERFIL MASCULINO - NECESSIDADES NUTRICIONAIS ESPECÍFICAS:
+1. PROTEÍNAS: Maior necessidade devido à maior massa muscular - distribua proteína de qualidade em todas as refeições (carnes magras, ovos, leguminosas)
+2. ZINCO: Importante para testosterona e sistema imune - inclua carnes, castanhas, sementes
+3. MAGNÉSIO: Fundamental para força muscular e energia - vegetais verde-escuros, castanhas, grãos integrais
+4. VITAMINAS DO COMPLEXO B: Essenciais para energia e metabolismo acelerado
+5. CARBOIDRATOS COMPLEXOS: Fornecimento constante de energia para manutenção da massa muscular
+6. FIBRAS: Importante para saúde cardiovascular e controle do colesterol
+7. ANTIOXIDANTES: Protegem contra stress oxidativo de metabolismo mais acelerado
+
+ATENÇÃO: Homens geralmente têm metabolismo basal 5-10% mais acelerado, maior massa muscular e necessitam de maior aporte proteico proporcional. Priorize alimentos densos nutricionalmente.
+'''}
+
+Necessidades nutricionais diárias (já calculadas para o perfil):
 - Calorias: $dailyCalories kcal
 - Proteínas: ${protein}g
 - Carboidratos: ${carbs}g
 - Gorduras: ${fats}g
-- Número de refeições: $mealsPerDay
+
+⚠️⚠️⚠️ IMPORTANTE - NÚMERO DE REFEIÇÕES ⚠️⚠️⚠️
+O usuário quer EXATAMENTE $mealsPerDay refeições por dia.
+Você DEVE gerar APENAS $mealsPerDay refeições no JSON.
+NÃO gere mais nem menos que $mealsPerDay refeições.
+
+${_getMealsTypesByCount(mealsPerDay)}
 ${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '''
 
 ⚠️ RESTRIÇÕES ALIMENTARES CRÍTICAS - SEGURANÇA ALIMENTAR ⚠️
@@ -524,7 +556,19 @@ Regras:
 1. Use APENAS alimentos da Tabela TACO
 2. Os valores nutricionais devem ser baseados nos dados do TACO
 3. Distribua as calorias e macronutrientes de forma equilibrada entre as refeições
-4. Considere o objetivo do usuário ($goal) ao escolher os alimentos
+4. 🎯 CONSIDERE O GÊNERO ($gender) AO ESCOLHER OS ALIMENTOS:
+   ${gender.toLowerCase().contains('fem') || gender.toLowerCase().contains('mulher') ? '''
+   - Para MULHERES: Priorize alimentos ricos em ferro (carne vermelha magra, feijão preto, lentilha, espinafre)
+   - Inclua fontes de cálcio (couve, brócolis, sardinha, gergelim)
+   - Adicione fontes de ácido fólico (vegetais folhosos verdes, feijões, lentilhas)
+   - Use gorduras saudáveis para saúde hormonal (abacate, castanhas, azeite)
+   - Equilibre proteínas de alta qualidade distribuídas no dia''' : '''
+   - Para HOMENS: Aumente a quantidade de proteínas de qualidade (carnes magras, ovos, peixes, frango)
+   - Inclua alimentos ricos em zinco (carne vermelha, castanhas, sementes de abóbora)
+   - Priorize carboidratos complexos para energia sustentada (arroz integral, batata doce, aveia)
+   - Adicione mais fontes de magnésio (castanhas, vegetais verde-escuros, grãos integrais)
+   - Aumente as porções proteicas em cada refeição para manutenção/ganho muscular'''}
+5. Considere o objetivo do usuário ($goal) ao escolher os alimentos
 ${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '''5. SEGURANÇA ALIMENTAR É PRIORIDADE: É OBRIGATÓRIO respeitar TODAS as restrições alimentares mencionadas. NÃO inclua alimentos proibidos, mesmo que isso dificulte atingir as metas nutricionais. A segurança do usuário é mais importante que valores nutricionais exatos.
 6. Verifique cada alimento individualmente antes de incluí-lo. Se houver qualquer dúvida sobre compatibilidade com as restrições, NÃO inclua o alimento.
 7. Se necessário, ajuste as quantidades dos alimentos permitidos para tentar atingir as necessidades nutricionais, mas NUNCA comprometa a segurança alimentar.''' : '5. Retorne APENAS o JSON, sem texto adicional antes ou depois'}
@@ -534,6 +578,9 @@ ${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '9. Certifique
 
     try {
       final response = await generateResponse(prompt);
+      
+      print('\n🤖 ===== RESPOSTA DA IA =====');
+      print('📏 Tamanho da resposta: ${response.length} caracteres');
       
       // Limpar a resposta para extrair apenas o JSON
       String jsonString = response.trim();
@@ -548,6 +595,29 @@ ${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '9. Certifique
       // Parse do JSON
       final Map<String, dynamic> parsed = 
           await Future.value(_parseJsonSafely(jsonString));
+      
+      // Validar número de refeições
+      final meals = parsed['meals'] as List<dynamic>?;
+      if (meals != null) {
+        print('📊 IA retornou ${meals.length} refeições (esperado: $mealsPerDay)');
+        
+        if (meals.length != mealsPerDay) {
+          print('⚠️ AVISO: IA retornou número errado de refeições!');
+          print('   Esperado: $mealsPerDay');
+          print('   Recebido: ${meals.length}');
+          
+          // Listar quais refeições foram retornadas
+          for (var meal in meals) {
+            final mealType = meal['mealType'] ?? 'desconhecido';
+            final mealName = meal['mealName'] ?? 'sem nome';
+            print('   - $mealType ($mealName)');
+          }
+        } else {
+          print('✅ Número correto de refeições!');
+        }
+      }
+      
+      print('🤖 ===== FIM =====\n');
       
       return parsed;
     } catch (e) {
@@ -574,6 +644,62 @@ ${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '9. Certifique
       }
     }
     throw Exception('Erro desconhecido ao parsear JSON');
+  }
+
+  /// Retorna as instruções específicas de quais refeições gerar baseado no número
+  String _getMealsTypesByCount(int mealsPerDay) {
+    final mealConfigs = {
+      3: '''
+Gere EXATAMENTE estas 3 refeições:
+1. breakfast (Café da Manhã)
+2. lunch (Almoço)
+3. dinner (Jantar)
+
+NÃO gere: morning_snack, afternoon_snack, evening_snack ou late_snack!
+''',
+      4: '''
+Gere EXATAMENTE estas 4 refeições:
+1. breakfast (Café da Manhã)
+2. lunch (Almoço)
+3. afternoon_snack (Lanche da Tarde)
+4. dinner (Jantar)
+
+NÃO gere: morning_snack, evening_snack ou late_snack!
+''',
+      5: '''
+Gere EXATAMENTE estas 5 refeições:
+1. breakfast (Café da Manhã)
+2. morning_snack (Lanche da Manhã)
+3. lunch (Almoço)
+4. afternoon_snack (Lanche da Tarde)
+5. dinner (Jantar)
+
+NÃO gere: evening_snack ou late_snack!
+''',
+      6: '''
+Gere EXATAMENTE estas 6 refeições:
+1. breakfast (Café da Manhã)
+2. morning_snack (Lanche da Manhã)
+3. lunch (Almoço)
+4. afternoon_snack (Lanche da Tarde)
+5. dinner (Jantar)
+6. evening_snack (Ceia)
+
+NÃO gere: late_snack!
+''',
+      7: '''
+Gere EXATAMENTE todas as 7 refeições:
+1. breakfast (Café da Manhã)
+2. morning_snack (Lanche da Manhã)
+3. lunch (Almoço)
+4. afternoon_snack (Lanche da Tarde)
+5. dinner (Jantar)
+6. evening_snack (Ceia)
+7. late_snack (Lanche Noturno)
+''',
+    };
+
+    return mealConfigs[mealsPerDay] ?? mealConfigs[5]!;
   }
 
   /// Verifica se o serviço está inicializado
