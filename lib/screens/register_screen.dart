@@ -139,6 +139,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 20),
+                // Logo
+                Center(
+                  child: Image.asset(
+                    'lib/images/Splash.png',
+                    width: 120,
+                    height: 120,
+                  ),
+                ),
+                const SizedBox(height: 24),
                 // Título
                 Text(
                   'Criar conta',

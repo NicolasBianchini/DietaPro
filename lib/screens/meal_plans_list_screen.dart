@@ -146,6 +146,21 @@ class _MealPlansListScreenState extends State<MealPlansListScreen> {
     return total;
   }
 
+  /// Conta o número real de refeições (apenas as que têm alimentos)
+  int _countMealsWithFoods(Map<String, dynamic> mealPlan) {
+    final meals = mealPlan['meals'] as Map<String, dynamic>?;
+    if (meals == null) return 0;
+    
+    int count = 0;
+    meals.forEach((mealType, mealFoods) {
+      if (mealFoods is List && mealFoods.isNotEmpty) {
+        count++;
+      }
+    });
+    
+    return count;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -361,7 +376,7 @@ class _MealPlansListScreenState extends State<MealPlansListScreen> {
                                     ),
                                     _buildNutritionInfo(
                                       label: 'Refeições',
-                                      value: '${(plan['meals'] as Map<String, dynamic>?)?.length ?? 0}',
+                                      value: '${_countMealsWithFoods(plan)}',
                                       icon: Icons.restaurant,
                                       color: AppTheme.primaryColor,
                                     ),
