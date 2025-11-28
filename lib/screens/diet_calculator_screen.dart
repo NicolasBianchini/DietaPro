@@ -7,13 +7,16 @@ import '../utils/nutrition_calculator.dart';
 import '../utils/food_database.dart';
 import '../services/gemini_service.dart';
 import '../services/firestore_service.dart';
+import 'terms_and_disclaimer_screen.dart';
 
 class DietCalculatorScreen extends StatefulWidget {
   final UserProfile? userProfile;
+  final String? mealPlanId; // Para edição de planos existentes
 
   const DietCalculatorScreen({
     super.key,
     this.userProfile,
+    this.mealPlanId,
   });
 
   @override
@@ -29,6 +32,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
 
   Map<String, dynamic>? _nutritionData;
   bool _isCalculated = false;
+  bool _isLoadingPlan = false;
 
   // Alimentos por refeição - será inicializado dinamicamente baseado no mealsPerDay
   late Map<String, List<MealFood>> _meals;
@@ -38,6 +42,26 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
 
   // Resultados de busca por refeição
   final Map<String, List<FoodItem>> _searchResults = {};
+
+  // Restrições alimentares
+  Set<String> _selectedRestrictions = {};
+  final TextEditingController _customRestrictionsController = TextEditingController();
+  
+  // Lista de restrições alimentares comuns
+  final List<String> _commonRestrictions = [
+    'Lactose',
+    'Glúten',
+    'Frutos do mar',
+    'Amendoim',
+    'Soja',
+    'Ovos',
+    'Nozes',
+    'Vegetariano',
+    'Vegano',
+    'Diabético',
+    'Hipertensão',
+    'Colesterol alto',
+  ];
 
   @override
   void initState() {
@@ -53,6 +77,14 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       if (widget.userProfile!.weight != null) {
         _weightController.text = widget.userProfile!.weight!.toStringAsFixed(1);
       }
+      
+      // Carregar restrições do perfil
+      if (widget.userProfile!.dietaryRestrictions != null) {
+        _selectedRestrictions = Set<String>.from(widget.userProfile!.dietaryRestrictions!);
+      }
+      if (widget.userProfile!.customDietaryRestrictions != null) {
+        _customRestrictionsController.text = widget.userProfile!.customDietaryRestrictions!;
+      }
     }
 
     // Adicionar listeners para busca
@@ -60,6 +92,11 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       entry.value.addListener(() {
         _performSearch(entry.key, entry.value.text);
       });
+    }
+
+    // Se há mealPlanId, carregar plano existente
+    if (widget.mealPlanId != null) {
+      _loadExistingMealPlan();
     }
   }
 
@@ -97,8 +134,83 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
     _descriptionController.dispose();
     _heightController.dispose();
     _weightController.dispose();
+    _customRestrictionsController.dispose();
     _searchControllers.values.forEach((controller) => controller.dispose());
     super.dispose();
+  }
+
+  /// Carrega um plano alimentar existente para edição
+  Future<void> _loadExistingMealPlan() async {
+    if (widget.mealPlanId == null || widget.userProfile?.id == null) return;
+
+    setState(() {
+      _isLoadingPlan = true;
+    });
+
+    try {
+      final firestoreService = FirestoreService();
+      final mealPlan = await firestoreService.getMealPlan(widget.mealPlanId!);
+
+      if (mealPlan != null && mounted) {
+        // Preencher nome e descrição
+        _dietNameController.text = mealPlan['dietName'] as String? ?? '';
+        _descriptionController.text = mealPlan['description'] as String? ?? '';
+
+        // Carregar dados nutricionais
+        if (mealPlan['nutritionData'] != null) {
+          _nutritionData = mealPlan['nutritionData'] as Map<String, dynamic>;
+          _isCalculated = true;
+        }
+
+        // Carregar refeições
+        if (mealPlan['meals'] != null) {
+          final mealsData = mealPlan['meals'] as Map<String, dynamic>;
+          
+          // Limpar refeições atuais
+          _meals.forEach((key, value) => value.clear());
+          
+          // Carregar refeições do plano
+          mealsData.forEach((mealType, mealFoodsData) {
+            if (_meals.containsKey(mealType)) {
+              final mealFoodsList = mealFoodsData as List<dynamic>;
+              _meals[mealType] = mealFoodsList.map((mfData) {
+                try {
+                  return MealFood.fromMap(mfData as Map<String, dynamic>);
+                } catch (e) {
+                  debugPrint('Erro ao carregar MealFood: $e');
+                  return null;
+                }
+              }).whereType<MealFood>().toList();
+            }
+          });
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Plano alimentar carregado com sucesso!'),
+              backgroundColor: AppTheme.primaryColor,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar plano: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao carregar plano: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingPlan = false;
+        });
+      }
+    }
   }
 
   void _performSearch(String mealType, String query) {
@@ -190,6 +302,18 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
       final activityText = _getActivityText(widget.userProfile!.activityLevel!);
       final goalText = _getGoalText(widget.userProfile!.goal!);
 
+      // Preparar informações de restrições alimentares
+      String restrictionsText = '';
+      if (_selectedRestrictions.isNotEmpty) {
+        restrictionsText = 'Restrições alimentares: ${_selectedRestrictions.join(', ')}';
+      }
+      if (_customRestrictionsController.text.trim().isNotEmpty) {
+        if (restrictionsText.isNotEmpty) {
+          restrictionsText += '. ';
+        }
+        restrictionsText += 'Outras restrições: ${_customRestrictionsController.text.trim()}';
+      }
+
       // Gerar plano alimentar usando TACO
       // Usar o número de refeições do perfil do usuário (padrão: 5)
       final mealsPerDay = widget.userProfile!.mealsPerDayOrDefault;
@@ -204,6 +328,7 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
         activityLevel: activityText,
         goal: goalText,
         mealsPerDay: mealsPerDay,
+        dietaryRestrictions: restrictionsText.isNotEmpty ? restrictionsText : null,
       );
 
       // Processar e adicionar alimentos às refeições
@@ -585,26 +710,44 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
         }
       });
       
-      // Salvar o plano alimentar
-      await firestoreService.saveMealPlan(
-        userId: widget.userProfile!.id!,
-        dietName: _dietNameController.text.trim(),
-        description: _descriptionController.text.trim().isEmpty 
-            ? null 
-            : _descriptionController.text.trim(),
-        nutritionData: _nutritionData!,
-        meals: mealsToSave,
-        createdAt: DateTime.now(),
-      );
+      // Salvar ou atualizar o plano alimentar
+      if (widget.mealPlanId != null) {
+        // Atualizar plano existente
+        await firestoreService.updateMealPlan(
+          mealPlanId: widget.mealPlanId!,
+          dietName: _dietNameController.text.trim(),
+          description: _descriptionController.text.trim().isEmpty 
+              ? null 
+              : _descriptionController.text.trim(),
+          nutritionData: _nutritionData!,
+          meals: mealsToSave,
+        );
+      } else {
+        // Criar novo plano
+        await firestoreService.saveMealPlan(
+          userId: widget.userProfile!.id!,
+          dietName: _dietNameController.text.trim(),
+          description: _descriptionController.text.trim().isEmpty 
+              ? null 
+              : _descriptionController.text.trim(),
+          nutritionData: _nutritionData!,
+          meals: mealsToSave,
+          createdAt: DateTime.now(),
+        );
+      }
 
       if (mounted) {
         Navigator.pop(context); // Fechar dialog de loading
         
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Plano alimentar salvo com sucesso!'),
+          SnackBar(
+            content: Text(
+              widget.mealPlanId != null 
+                  ? 'Plano alimentar atualizado com sucesso!'
+                  : 'Plano alimentar salvo com sucesso!',
+            ),
             backgroundColor: AppTheme.primaryColor,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
 
@@ -648,13 +791,15 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
         ),
         title: const Text('Calculadora de Dieta'),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+      body: _isLoadingPlan
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
               // Título e descrição com card destacado
               Container(
                 padding: const EdgeInsets.all(24),
@@ -708,7 +853,77 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
                   ],
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              
+              // Banner de Aviso Médico
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.red.shade300,
+                    width: 2,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.warning_amber_rounded,
+                          color: Colors.red.shade700,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Aviso Médico Importante',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red.shade900,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'O DietaPro é uma ferramenta de apoio e não substitui o acompanhamento de um nutricionista clínico ou profissional de saúde qualificado.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.red.shade800,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const TermsAndDisclaimerScreen(),
+                          ),
+                        );
+                      },
+                      child: Text(
+                        'Leia os Termos de Uso e Aviso Legal',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.red.shade900,
+                          fontWeight: FontWeight.bold,
+                          decoration: TextDecoration.underline,
+                          decorationColor: Colors.red.shade900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              
               // Formulário básico
               Container(
                 padding: const EdgeInsets.all(24),
@@ -860,11 +1075,37 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
+                    
+                    // Botão de Restrições Alimentares
+                    OutlinedButton.icon(
+                      onPressed: _showDietaryRestrictionsDialog,
+                      icon: const Icon(Icons.restaurant_menu),
+                      label: const Text('Restrições Alimentares'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primaryColor,
+                        side: BorderSide(color: AppTheme.primaryColor),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
+                      child: ElevatedButton.icon(
                         onPressed: _calculateNutrition,
+                        icon: const Icon(Icons.calculate, color: Colors.white),
+                        label: const Text(
+                          'Calcular Necessidades Nutricionais',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.primaryColor,
                           shadowColor: AppTheme.primaryColor.withValues(alpha: 0.3),
@@ -873,23 +1114,6 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
                             borderRadius: BorderRadius.circular(16),
                           ),
                           elevation: 4,
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                'Calcular Necessidades Nutricionais',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
                         ),
                       ),
                     ),
@@ -903,35 +1127,64 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
               ],
               // Seções de Refeições
               if (_isCalculated) ...[
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
                 ..._buildMealSections(),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
                 // Resumo Total do Plano
                 _buildTotalPlanSummary(),
                 const SizedBox(height: 24),
-                // Botão de confirmar
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _saveMealPlan,
-                    icon: const Icon(Icons.check, color: Colors.white),
-                    label: const Text(
-                      'Confirmar Plano Alimentar',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                // Botões de ação
+                Row(
+                  children: [
+                    if (widget.mealPlanId != null) ...[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _calculateNutrition,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Gerar Nova'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.primaryColor,
+                            side: BorderSide(color: AppTheme.primaryColor),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton.icon(
+                        onPressed: _saveMealPlan,
+                        icon: const Icon(Icons.check, color: Colors.white),
+                        label: Text(
+                          widget.mealPlanId != null 
+                              ? 'Salvar Alterações'
+                              : 'Confirmar Plano Alimentar',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                  ),
+                  ],
                 ),
               ],
-            ],
-          ),
-        ),
-      ),
+                  ],
+                ),
+              ),
+            ),
     );
   }
 
@@ -1441,6 +1694,100 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
                 ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Mostra dialog para coletar restrições alimentares
+  Future<void> _showDietaryRestrictionsDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.restaurant_menu, color: AppTheme.primaryColor),
+              const SizedBox(width: 8),
+              const Text('Restrições Alimentares'),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Selecione suas alergias, intolerâncias ou restrições alimentares:',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                
+                // Checkboxes de restrições comuns
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _commonRestrictions.map((restriction) {
+                    final isSelected = _selectedRestrictions.contains(restriction);
+                    return FilterChip(
+                      label: Text(
+                        restriction,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        setDialogState(() {
+                          if (selected) {
+                            _selectedRestrictions.add(restriction);
+                          } else {
+                            _selectedRestrictions.remove(restriction);
+                          }
+                        });
+                      },
+                      selectedColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                      checkmarkColor: AppTheme.primaryColor,
+                      side: BorderSide(
+                        color: isSelected 
+                            ? AppTheme.primaryColor 
+                            : Colors.grey.shade300,
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 20),
+                
+                // Campo de texto para restrições customizadas
+                TextField(
+                  controller: _customRestrictionsController,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: 'Outras restrições alimentares',
+                    hintText: 'Descreva outras alergias, intolerâncias ou restrições...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    helperText: 'Ex: Alergia a corantes, restrição de sódio, etc.',
+                  ),
+                  textInputAction: TextInputAction.newline,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryColor,
+              ),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
       ),
     );
   }

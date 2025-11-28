@@ -6,6 +6,7 @@ import '../services/auth_service.dart';
 import '../models/user_profile.dart';
 import 'login_screen.dart';
 import 'onboarding/onboarding_wrapper.dart';
+import 'terms_and_disclaimer_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -71,10 +72,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
             id: userCredential.user!.uid,
             email: email,
             name: name,
-          createdAt: DateTime.now(),
-        );
+            termsAccepted: _acceptTerms,
+            termsAcceptedAt: _acceptTerms ? DateTime.now() : null,
+            createdAt: DateTime.now(),
+          );
 
-        await firestoreService.saveUserProfile(userProfile);
+          await firestoreService.saveUserProfile(userProfile);
         }
 
         if (mounted) {
@@ -148,7 +151,55 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 20),
+                
+                // Banner de Aviso Médico
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.red.shade300,
+                      width: 2,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.warning_amber_rounded,
+                            color: Colors.red.shade700,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Aviso Médico Importante',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red.shade900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'O DietaPro é uma ferramenta de apoio e não substitui o acompanhamento de um nutricionista clínico ou profissional de saúde qualificado.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.red.shade800,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                
                 // Campo de Nome
                 TextFormField(
                   controller: _nameController,
@@ -259,59 +310,93 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
-                // Checkbox de termos
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Checkbox(
-                      value: _acceptTerms,
-                      onChanged: (value) {
-                        setState(() {
-                          _acceptTerms = value ?? false;
-                        });
-                      },
-                      activeColor: AppTheme.primaryColor,
+                
+                // Seção de Aceite de Termos
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _acceptTerms 
+                          ? AppTheme.primaryColor 
+                          : Colors.grey.shade300,
+                      width: _acceptTerms ? 2 : 1,
                     ),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _acceptTerms = !_acceptTerms;
-                          });
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: RichText(
-                            text: TextSpan(
-                              style: Theme.of(context).textTheme.bodySmall,
-                              children: [
-                                const TextSpan(
-                                  text: 'Eu concordo com os ',
-                                ),
-                                TextSpan(
-                                  text: 'Termos de Uso',
-                                  style: TextStyle(
-                                    color: AppTheme.primaryColor,
-                                    fontWeight: FontWeight.w600,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Checkbox(
+                            value: _acceptTerms,
+                            onChanged: (value) {
+                              setState(() {
+                                _acceptTerms = value ?? false;
+                              });
+                            },
+                            activeColor: AppTheme.primaryColor,
+                          ),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  RichText(
+                                    text: TextSpan(
+                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                            color: Colors.grey.shade800,
+                                          ),
+                                      children: [
+                                        const TextSpan(
+                                          text: 'Eu li e concordo com os ',
+                                        ),
+                                        WidgetSpan(
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (_) => const TermsAndDisclaimerScreen(),
+                                                ),
+                                              );
+                                            },
+                                            child: Text(
+                                              'Termos de Uso e Aviso Legal',
+                                              style: TextStyle(
+                                                color: AppTheme.primaryColor,
+                                                fontWeight: FontWeight.bold,
+                                                decoration: TextDecoration.underline,
+                                                decorationColor: AppTheme.primaryColor,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const TextSpan(
+                                          text: ' do DietaPro.',
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                const TextSpan(
-                                  text: ' e ',
-                                ),
-                                TextSpan(
-                                  text: 'Política de Privacidade',
-                                  style: TextStyle(
-                                    color: AppTheme.primaryColor,
-                                    fontWeight: FontWeight.w600,
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Ao criar uma conta, você confirma que leu e compreendeu o aviso médico e os termos de uso do aplicativo.',
+                                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: Colors.grey.shade600,
+                                          fontSize: 12,
+                                        ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 32),
                 // Botão de Registro

@@ -21,15 +21,33 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final _nameController = TextEditingController();
   final _heightController = TextEditingController();
   final _weightController = TextEditingController();
+  final _customRestrictionsController = TextEditingController();
   
   Gender? _selectedGender;
   DateTime? _selectedDateOfBirth;
   ActivityLevel? _selectedActivityLevel;
   Goal? _selectedGoal;
   int _mealsPerDay = 5;
+  Set<String> _selectedRestrictions = {};
   
   bool _isLoading = false;
   final _firestoreService = FirestoreService();
+  
+  // Lista de restrições alimentares comuns
+  final List<String> _commonRestrictions = [
+    'Lactose',
+    'Glúten',
+    'Frutos do mar',
+    'Amendoim',
+    'Soja',
+    'Ovos',
+    'Nozes',
+    'Vegetariano',
+    'Vegano',
+    'Diabético',
+    'Hipertensão',
+    'Colesterol alto',
+  ];
 
   @override
   void initState() {
@@ -42,6 +60,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _selectedActivityLevel = widget.userProfile.activityLevel;
     _selectedGoal = widget.userProfile.goal;
     _mealsPerDay = widget.userProfile.mealsPerDay ?? 5;
+    _selectedRestrictions = Set<String>.from(widget.userProfile.dietaryRestrictions ?? []);
+    _customRestrictionsController.text = widget.userProfile.customDietaryRestrictions ?? '';
   }
 
   @override
@@ -49,6 +69,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameController.dispose();
     _heightController.dispose();
     _weightController.dispose();
+    _customRestrictionsController.dispose();
     super.dispose();
   }
 
@@ -120,6 +141,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         activityLevel: _selectedActivityLevel,
         goal: _selectedGoal,
         mealsPerDay: _mealsPerDay,
+        dietaryRestrictions: _selectedRestrictions.isNotEmpty ? _selectedRestrictions.toList() : null,
+        customDietaryRestrictions: _customRestrictionsController.text.trim().isNotEmpty 
+            ? _customRestrictionsController.text.trim() 
+            : null,
         createdAt: widget.userProfile.createdAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
       );
@@ -191,6 +216,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               // Gênero
               DropdownButtonFormField<Gender>(
                 value: _selectedGender,
+                isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Gênero *',
                   prefixIcon: const Icon(Icons.person_outline, color: AppTheme.primaryColor),
@@ -213,7 +239,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   }
                   return DropdownMenuItem(
                     value: gender,
-                    child: Text(label),
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   );
                 }).toList(),
                 onChanged: (value) {
@@ -318,6 +347,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               // Nível de atividade
               DropdownButtonFormField<ActivityLevel>(
                 value: _selectedActivityLevel,
+                isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Nível de Atividade *',
                   prefixIcon: const Icon(Icons.fitness_center, color: AppTheme.primaryColor),
@@ -346,7 +376,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   }
                   return DropdownMenuItem(
                     value: level,
-                    child: Text(label),
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   );
                 }).toList(),
                 onChanged: (value) {
@@ -366,6 +399,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               // Objetivo
               DropdownButtonFormField<Goal>(
                 value: _selectedGoal,
+                isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Objetivo *',
                   prefixIcon: const Icon(Icons.flag, color: AppTheme.primaryColor),
@@ -394,7 +428,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   }
                   return DropdownMenuItem(
                     value: goal,
-                    child: Text(label),
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   );
                 }).toList(),
                 onChanged: (value) {
@@ -470,6 +507,102 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           color: AppTheme.primaryColor,
                         ),
                       ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+              
+              // Seção de Restrições Alimentares
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade300),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withValues(alpha: 0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.restaurant_menu,
+                          color: AppTheme.primaryColor,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Restrições Alimentares',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Selecione suas alergias, intolerâncias ou restrições alimentares',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.grey.shade600,
+                          ),
+                    ),
+                    const SizedBox(height: 20),
+                    
+                    // Checkboxes de restrições comuns
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: _commonRestrictions.map((restriction) {
+                        final isSelected = _selectedRestrictions.contains(restriction);
+                        return FilterChip(
+                          label: Text(
+                            restriction,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          selected: isSelected,
+                          onSelected: (selected) {
+                            setState(() {
+                              if (selected) {
+                                _selectedRestrictions.add(restriction);
+                              } else {
+                                _selectedRestrictions.remove(restriction);
+                              }
+                            });
+                          },
+                          selectedColor: AppTheme.primaryColor.withValues(alpha: 0.2),
+                          checkmarkColor: AppTheme.primaryColor,
+                          side: BorderSide(
+                            color: isSelected 
+                                ? AppTheme.primaryColor 
+                                : Colors.grey.shade300,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+                    
+                    // Campo de texto para restrições customizadas
+                    TextFormField(
+                      controller: _customRestrictionsController,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: 'Outras restrições alimentares',
+                        hintText: 'Descreva outras alergias, intolerâncias ou restrições alimentares que você possui...',
+                        prefixIcon: const Icon(Icons.edit_note, color: AppTheme.primaryColor),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        helperText: 'Ex: Alergia a corantes, restrição de sódio, etc.',
+                      ),
+                      textInputAction: TextInputAction.newline,
                     ),
                   ],
                 ),

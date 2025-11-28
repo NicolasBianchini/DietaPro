@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import '../theme/app_theme.dart';
 import '../models/user_profile.dart';
 import '../models/food_item.dart';
@@ -21,13 +22,21 @@ class _MealsListScreenState extends State<MealsListScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   List<Map<String, dynamic>> _meals = [];
   bool _isLoading = true;
+  bool _isSaving = false;
   String? _selectedDietId;
   List<Map<String, dynamic>> _availableDiets = [];
+  StreamSubscription<List<Map<String, dynamic>>>? _mealsSubscription;
 
   @override
   void initState() {
     super.initState();
     _loadMealPlans();
+  }
+
+  @override
+  void dispose() {
+    _mealsSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadMealPlans() async {
@@ -49,8 +58,9 @@ class _MealsListScreenState extends State<MealsListScreen> {
         setState(() {
           _availableDiets = mealPlans;
           _selectedDietId = mealPlans.first['id'] as String;
-          _loadMealsFromPlan(mealPlans.first);
         });
+        await _loadMealsFromPlan(mealPlans.first);
+        _startMealsStream();
       } else {
         setState(() {
           _meals = [];
@@ -73,7 +83,7 @@ class _MealsListScreenState extends State<MealsListScreen> {
     }
   }
 
-  void _loadMealsFromPlan(Map<String, dynamic> mealPlan) {
+  Future<void> _loadMealsFromPlan(Map<String, dynamic> mealPlan) async {
     try {
       final mealsData = mealPlan['meals'] as Map<String, dynamic>?;
       if (mealsData == null) {
@@ -181,6 +191,9 @@ class _MealsListScreenState extends State<MealsListScreen> {
       for (var meal in mealsList) {
         debugPrint('  - ${meal['name']}: ${meal['foods'].length} alimentos, ${meal['calories']} kcal');
       }
+
+      // Carregar dados salvos do Firestore (horários e status)
+      await _loadSavedMealData(mealsList);
 
       setState(() {
         _meals = mealsList;
@@ -298,15 +311,28 @@ class _MealsListScreenState extends State<MealsListScreen> {
         title: const Text('Refeições do Dia'),
         elevation: 0,
         actions: [
+          if (_isSaving)
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+            ),
           if (_availableDiets.isNotEmpty)
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert),
-              onSelected: (dietId) {
+              onSelected: (dietId) async {
                 setState(() {
                   _selectedDietId = dietId;
-                  final selectedDiet = _availableDiets.firstWhere((d) => d['id'] == dietId);
-                  _loadMealsFromPlan(selectedDiet);
                 });
+                final selectedDiet = _availableDiets.firstWhere((d) => d['id'] == dietId);
+                await _loadMealsFromPlan(selectedDiet);
+                _startMealsStream();
               },
               itemBuilder: (context) => _availableDiets.map((diet) {
                 return PopupMenuItem<String>(
@@ -518,10 +544,13 @@ class _MealsListScreenState extends State<MealsListScreen> {
                 // Checkbox para marcar como concluída
                 Checkbox(
                   value: isCompleted,
-                  onChanged: (value) {
+                  onChanged: (value) async {
                     setState(() {
                       _meals[index]['isCompleted'] = value ?? false;
                     });
+                    
+                    // Salvar automaticamente após mudar status
+                    await _saveMealsToFirestore();
                   },
                   activeColor: AppTheme.primaryColor,
                 ),
@@ -608,6 +637,177 @@ class _MealsListScreenState extends State<MealsListScreen> {
     );
   }
 
+  /// Carrega dados salvos do Firestore (horários e status de conclusão)
+  Future<void> _loadSavedMealData(List<Map<String, dynamic>> mealsList) async {
+    if (widget.userProfile?.id == null) return;
+
+    try {
+      final today = DateTime.now();
+      final savedMeals = await _firestoreService.getDailyMeals(
+        userId: widget.userProfile!.id!,
+        date: today,
+      );
+
+      if (savedMeals.isNotEmpty) {
+        // Criar um mapa para busca rápida por ID da refeição
+        final savedMealsMap = <String, Map<String, dynamic>>{};
+        for (final savedMeal in savedMeals) {
+          final mealId = savedMeal['id'] as String?;
+          if (mealId != null) {
+            savedMealsMap[mealId] = savedMeal;
+          }
+        }
+
+        // Atualizar refeições com dados salvos
+        for (int i = 0; i < mealsList.length; i++) {
+          final mealId = mealsList[i]['id'] as String;
+          if (savedMealsMap.containsKey(mealId)) {
+            final savedMeal = savedMealsMap[mealId]!;
+            if (savedMeal['time'] != null) {
+              mealsList[i]['time'] = savedMeal['time'] as String;
+            }
+            if (savedMeal['isCompleted'] != null) {
+              mealsList[i]['isCompleted'] = savedMeal['isCompleted'] as bool;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar dados salvos: $e');
+      // Não mostrar erro ao usuário, apenas usar valores padrão
+    }
+  }
+
+  /// Salva as refeições no Firestore
+  Future<void> _saveMealsToFirestore() async {
+    if (widget.userProfile?.id == null || _isSaving) return;
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final today = DateTime.now();
+      
+      // Preparar dados para salvar
+      final mealsToSave = _meals.map((meal) => {
+        'id': meal['id'] as String,
+        'name': meal['name'] as String,
+        'time': meal['time'] as String,
+        'calories': meal['calories'] as int,
+        'isCompleted': meal['isCompleted'] as bool,
+        'foods': meal['foods'] as List<Map<String, dynamic>>,
+      }).toList();
+
+      await _firestoreService.saveDailyMeals(
+        userId: widget.userProfile!.id!,
+        date: today,
+        meals: mealsToSave,
+      );
+
+      if (mounted) {
+        HapticFeedback.lightImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 8),
+                Text('Dados salvos com sucesso!'),
+              ],
+            ),
+            backgroundColor: AppTheme.primaryColor,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Erro ao salvar refeições: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Erro ao salvar: ${e.toString().replaceFirst('Exception: ', '')}',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: AppTheme.errorColor,
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  /// Inicia o stream para sincronização automática
+  void _startMealsStream() {
+    if (widget.userProfile?.id == null) return;
+
+    _mealsSubscription?.cancel();
+    
+    final today = DateTime.now();
+    _mealsSubscription = _firestoreService.streamDailyMeals(
+      userId: widget.userProfile!.id!,
+      date: today,
+    ).listen(
+      (savedMeals) {
+        if (savedMeals.isNotEmpty && mounted) {
+          // Atualizar apenas se houver mudanças externas
+          _syncMealsWithFirestore(savedMeals);
+        }
+      },
+      onError: (error) {
+        debugPrint('Erro no stream de refeições: $error');
+      },
+    );
+  }
+
+  /// Sincroniza refeições locais com dados do Firestore
+  void _syncMealsWithFirestore(List<Map<String, dynamic>> savedMeals) {
+    final savedMealsMap = <String, Map<String, dynamic>>{};
+    for (final savedMeal in savedMeals) {
+      final mealId = savedMeal['id'] as String?;
+      if (mealId != null) {
+        savedMealsMap[mealId] = savedMeal;
+      }
+    }
+
+    bool hasChanges = false;
+    for (int i = 0; i < _meals.length; i++) {
+      final mealId = _meals[i]['id'] as String;
+      if (savedMealsMap.containsKey(mealId)) {
+        final savedMeal = savedMealsMap[mealId]!;
+        if (savedMeal['time'] != null && _meals[i]['time'] != savedMeal['time']) {
+          _meals[i]['time'] = savedMeal['time'] as String;
+          hasChanges = true;
+        }
+        if (savedMeal['isCompleted'] != null && 
+            _meals[i]['isCompleted'] != savedMeal['isCompleted']) {
+          _meals[i]['isCompleted'] = savedMeal['isCompleted'] as bool;
+          hasChanges = true;
+        }
+      }
+    }
+
+    if (hasChanges && mounted) {
+      setState(() {});
+    }
+  }
+
   Future<void> _editMealTime(int index) async {
     final meal = _meals[index];
     final currentTime = meal['time'] as String;
@@ -632,6 +832,9 @@ class _MealsListScreenState extends State<MealsListScreen> {
         final formattedTime = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
         _meals[index]['time'] = formattedTime;
       });
+      
+      // Salvar automaticamente após editar horário
+      await _saveMealsToFirestore();
     }
   }
 }

@@ -433,6 +433,7 @@ Responda em português brasileiro de forma clara, objetiva e motivadora.
     required String activityLevel,
     required String goal,
     int mealsPerDay = 5,
+    String? dietaryRestrictions,
   }) async {
     final prompt = '''
 Você é um nutricionista especializado em criar planos alimentares usando EXCLUSIVAMENTE alimentos da Tabela TACO (Tabela Brasileira de Composição de Alimentos - 4ª edição).
@@ -451,6 +452,32 @@ Necessidades nutricionais diárias:
 - Carboidratos: ${carbs}g
 - Gorduras: ${fats}g
 - Número de refeições: $mealsPerDay
+${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '''
+
+⚠️ RESTRIÇÕES ALIMENTARES CRÍTICAS - SEGURANÇA ALIMENTAR ⚠️
+$dietaryRestrictions
+
+INSTRUÇÕES OBRIGATÓRIAS SOBRE RESTRIÇÕES:
+1. É ABSOLUTAMENTE PROIBIDO incluir alimentos que contenham, possam conter ou sejam derivados dos ingredientes/alergênicos mencionados nas restrições acima.
+2. Verifique cuidadosamente cada alimento antes de incluí-lo no plano:
+   - Se a restrição menciona "Lactose": NÃO inclua leite, queijos, iogurtes, manteiga ou qualquer derivado lácteo.
+   - Se a restrição menciona "Glúten": NÃO inclua trigo, cevada, centeio, aveia (a menos que seja sem glúten) ou produtos que contenham esses cereais.
+   - Se a restrição menciona "Frutos do mar": NÃO inclua peixes, camarões, mariscos, lulas ou qualquer alimento marinho.
+   - Se a restrição menciona "Amendoim" ou "Nozes": NÃO inclua esses alimentos ou produtos que possam conter traços.
+   - Se a restrição menciona "Soja": NÃO inclua soja, tofu, leite de soja ou derivados.
+   - Se a restrição menciona "Ovos": NÃO inclua ovos ou produtos que contenham ovos.
+   - Se a restrição menciona "Vegetariano": NÃO inclua carnes, peixes ou produtos de origem animal.
+   - Se a restrição menciona "Vegano": NÃO inclua qualquer produto de origem animal (carnes, laticínios, ovos, mel, etc.).
+   - Se a restrição menciona "Diabético": Priorize alimentos com baixo índice glicêmico e evite açúcares simples.
+   - Se a restrição menciona "Hipertensão" ou "Colesterol alto": Evite alimentos com alto teor de sódio ou gordura saturada.
+
+3. Quando houver dúvida sobre um alimento, NÃO o inclua. É melhor ser conservador e garantir a segurança do usuário.
+
+4. Se as restrições tornarem difícil atingir as necessidades nutricionais, ajuste as quantidades dos alimentos permitidos, mas NUNCA inclua alimentos proibidos.
+
+AVISO DE SEGURANÇA ALIMENTAR:
+Este plano alimentar é gerado automaticamente e deve ser revisado por um nutricionista ou profissional de saúde qualificado antes do consumo, especialmente quando há restrições alimentares, alergias ou condições médicas. O usuário deve sempre verificar os rótulos dos alimentos e consultar um profissional de saúde em caso de dúvida.
+''' : ''}
 
 IMPORTANTE: Use APENAS alimentos que estão na Tabela TACO. Retorne a resposta em formato JSON válido com a seguinte estrutura:
 
@@ -498,8 +525,11 @@ Regras:
 2. Os valores nutricionais devem ser baseados nos dados do TACO
 3. Distribua as calorias e macronutrientes de forma equilibrada entre as refeições
 4. Considere o objetivo do usuário ($goal) ao escolher os alimentos
-5. Retorne APENAS o JSON, sem texto adicional antes ou depois
-6. Certifique-se de que a soma total das refeições se aproxime das necessidades diárias
+${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '''5. SEGURANÇA ALIMENTAR É PRIORIDADE: É OBRIGATÓRIO respeitar TODAS as restrições alimentares mencionadas. NÃO inclua alimentos proibidos, mesmo que isso dificulte atingir as metas nutricionais. A segurança do usuário é mais importante que valores nutricionais exatos.
+6. Verifique cada alimento individualmente antes de incluí-lo. Se houver qualquer dúvida sobre compatibilidade com as restrições, NÃO inclua o alimento.
+7. Se necessário, ajuste as quantidades dos alimentos permitidos para tentar atingir as necessidades nutricionais, mas NUNCA comprometa a segurança alimentar.''' : '5. Retorne APENAS o JSON, sem texto adicional antes ou depois'}
+${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '8. Retorne APENAS o JSON, sem texto adicional antes ou depois' : '6. Retorne APENAS o JSON, sem texto adicional antes ou depois'}
+${dietaryRestrictions != null && dietaryRestrictions.isNotEmpty ? '9. Certifique-se de que a soma total das refeições se aproxime das necessidades diárias, respeitando todas as restrições' : '7. Certifique-se de que a soma total das refeições se aproxime das necessidades diárias'}
 ''';
 
     try {

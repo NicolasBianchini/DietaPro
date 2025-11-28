@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import '../theme/app_theme.dart';
 import '../models/user_profile.dart';
+import '../services/firestore_service.dart';
 import 'login_screen.dart';
 import 'diet_calculator_screen.dart';
 import 'meals_list_screen.dart';
 import 'edit_profile_screen.dart';
+import 'help_screen.dart';
+import 'settings_screen.dart';
+import 'statistics_screen.dart';
+import 'water_tracking_screen.dart';
+import 'weight_tracking_screen.dart';
+import 'meal_plans_list_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserProfile? userProfile;
@@ -20,53 +28,316 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Dados mockados - em produção, viriam de um serviço/backend
-  int _caloriesConsumed = 1200;
-  int _caloriesGoal = 2000;
-  double _protein = 80.0;
-  double _carbs = 150.0;
-  double _fats = 60.0;
+  final FirestoreService _firestoreService = FirestoreService();
+  
+  // Dados reais do Firestore
+  int _caloriesConsumed = 0;
+  int _caloriesGoal = 0;
+  double _protein = 0.0;
+  double _proteinGoal = 0.0;
+  double _carbs = 0.0;
+  double _carbsGoal = 0.0;
+  double _fats = 0.0;
+  double _fatsGoal = 0.0;
   
   int _currentIndex = 1; // Índice inicial (meio = Home)
+  bool _isLoading = true;
   
-  // Refeições do dia - agora mutáveis
-  final List<Map<String, dynamic>> _todayMeals = [
-    {
-      'icon': Icons.wb_sunny_outlined,
-      'meal': 'Café da Manhã',
-      'calories': 350,
-      'time': '08:00',
-      'isCompleted': true,
-    },
-    {
-      'icon': Icons.cookie_outlined,
-      'meal': 'Lanche da Manhã',
-      'calories': 150,
-      'time': '10:30',
-      'isCompleted': false,
-    },
-    {
-      'icon': Icons.lunch_dining_outlined,
-      'meal': 'Almoço',
-      'calories': 650,
-      'time': '13:00',
-      'isCompleted': true,
-    },
-    {
-      'icon': Icons.cookie_outlined,
-      'meal': 'Lanche da Tarde',
-      'calories': 200,
-      'time': '16:00',
-      'isCompleted': false,
-    },
-    {
-      'icon': Icons.dinner_dining_outlined,
-      'meal': 'Jantar',
-      'calories': 200,
-      'time': '19:00',
-      'isCompleted': false,
-    },
-  ];
+  // Refeições do dia - carregadas do Firestore
+  List<Map<String, dynamic>> _todayMeals = [];
+  Map<String, dynamic>? _currentMealPlan;
+  StreamSubscription<List<Map<String, dynamic>>>? _mealsSubscription;
+  
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _mealsSubscription?.cancel();
+    super.dispose();
+  }
+
+  /// Carrega todos os dados necessários
+  Future<void> _loadData() async {
+    if (widget.userProfile?.id == null) {
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _loadMealPlan();
+      await _loadTodayMeals();
+      _calculateNutrition();
+      _startMealsStream();
+    } catch (e) {
+      debugPrint('Erro ao carregar dados: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  /// Carrega o plano alimentar atual
+  Future<void> _loadMealPlan() async {
+    if (widget.userProfile?.id == null) return;
+
+    try {
+      final mealPlans = await _firestoreService.getUserMealPlans(widget.userProfile!.id!);
+      
+      if (mealPlans.isNotEmpty) {
+        // Usar o plano mais recente
+        _currentMealPlan = mealPlans.first;
+        
+        // Carregar metas nutricionais do plano
+        if (_currentMealPlan!['nutritionData'] != null) {
+          final nutritionData = _currentMealPlan!['nutritionData'] as Map<String, dynamic>;
+          _caloriesGoal = (nutritionData['calories'] as num?)?.toInt() ?? 0;
+          _proteinGoal = (nutritionData['protein'] as num?)?.toDouble() ?? 0.0;
+          _carbsGoal = (nutritionData['carbs'] as num?)?.toDouble() ?? 0.0;
+          _fatsGoal = (nutritionData['fats'] as num?)?.toDouble() ?? 0.0;
+        }
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar plano alimentar: $e');
+    }
+  }
+
+  /// Carrega as refeições do dia atual
+  Future<void> _loadTodayMeals() async {
+    if (widget.userProfile?.id == null || _currentMealPlan == null) {
+      _todayMeals = [];
+      return;
+    }
+
+    try {
+      final today = DateTime.now();
+      final savedMeals = await _firestoreService.getDailyMeals(
+        userId: widget.userProfile!.id!,
+        date: today,
+      );
+
+      // Se há refeições salvas, usar elas e garantir que têm ícones
+      if (savedMeals.isNotEmpty) {
+        _todayMeals = _ensureMealsHaveIcons(savedMeals);
+      } else {
+        // Caso contrário, criar refeições baseadas no plano
+        _todayMeals = _createMealsFromPlan();
+      }
+    } catch (e) {
+      debugPrint('Erro ao carregar refeições do dia: $e');
+      _todayMeals = _createMealsFromPlan();
+    }
+  }
+
+  /// Garante que todas as refeições têm ícones válidos
+  List<Map<String, dynamic>> _ensureMealsHaveIcons(List<Map<String, dynamic>> meals) {
+    final mealTypeMap = {
+      'breakfast': Icons.wb_sunny_outlined,
+      'morning_snack': Icons.cookie_outlined,
+      'lunch': Icons.lunch_dining_outlined,
+      'afternoon_snack': Icons.cookie_outlined,
+      'dinner': Icons.dinner_dining_outlined,
+      'evening_snack': Icons.nightlight_outlined,
+      'late_snack': Icons.bedtime_outlined,
+    };
+
+    return meals.map((meal) {
+      // Se já tem ícone válido, manter
+      if (meal['icon'] != null && meal['icon'] is IconData) {
+        return meal;
+      }
+
+      // Tentar determinar o tipo de refeição pelo nome ou ID
+      final mealName = (meal['name'] as String? ?? meal['meal'] as String? ?? '').toLowerCase();
+      final mealId = meal['id'] as String? ?? '';
+      
+      IconData? icon;
+      
+      // Verificar pelo ID primeiro
+      for (final entry in mealTypeMap.entries) {
+        if (mealId.contains(entry.key)) {
+          icon = entry.value;
+          break;
+        }
+      }
+      
+      // Se não encontrou pelo ID, tentar pelo nome
+      if (icon == null) {
+        if (mealName.contains('café') || mealName.contains('manhã')) {
+          icon = Icons.wb_sunny_outlined;
+        } else if (mealName.contains('almoço')) {
+          icon = Icons.lunch_dining_outlined;
+        } else if (mealName.contains('jantar')) {
+          icon = Icons.dinner_dining_outlined;
+        } else if (mealName.contains('lanche') || mealName.contains('snack')) {
+          icon = Icons.cookie_outlined;
+        } else if (mealName.contains('ceia')) {
+          icon = Icons.nightlight_outlined;
+        } else {
+          icon = Icons.restaurant; // Ícone padrão
+        }
+      }
+
+      return {
+        ...meal,
+        'icon': icon,
+      };
+    }).toList();
+  }
+
+  /// Cria lista de refeições baseada no plano alimentar
+  List<Map<String, dynamic>> _createMealsFromPlan() {
+    if (_currentMealPlan == null) return [];
+
+    final mealsData = _currentMealPlan!['meals'] as Map<String, dynamic>?;
+    if (mealsData == null) return [];
+
+    final mealTypeMap = {
+      'breakfast': {'name': 'Café da Manhã', 'time': '08:00', 'icon': Icons.wb_sunny_outlined},
+      'morning_snack': {'name': 'Lanche da Manhã', 'time': '10:30', 'icon': Icons.cookie_outlined},
+      'lunch': {'name': 'Almoço', 'time': '13:00', 'icon': Icons.lunch_dining_outlined},
+      'afternoon_snack': {'name': 'Lanche da Tarde', 'time': '16:00', 'icon': Icons.cookie_outlined},
+      'dinner': {'name': 'Jantar', 'time': '19:00', 'icon': Icons.dinner_dining_outlined},
+      'evening_snack': {'name': 'Ceia', 'time': '21:00', 'icon': Icons.nightlight_outlined},
+      'late_snack': {'name': 'Lanche Noturno', 'time': '23:00', 'icon': Icons.bedtime_outlined},
+    };
+
+    final mealsList = <Map<String, dynamic>>[];
+    final mealsPerDay = widget.userProfile?.mealsPerDayOrDefault ?? 5;
+    
+    final mealConfigs = <int, List<String>>{
+      3: ['breakfast', 'lunch', 'dinner'],
+      4: ['breakfast', 'lunch', 'afternoon_snack', 'dinner'],
+      5: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner'],
+      6: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner', 'evening_snack'],
+      7: ['breakfast', 'morning_snack', 'lunch', 'afternoon_snack', 'dinner', 'evening_snack', 'late_snack'],
+    };
+
+    final mealOrder = mealConfigs[mealsPerDay] ?? mealConfigs[5]!;
+
+    for (final mealType in mealOrder) {
+      if (mealsData.containsKey(mealType)) {
+        final mealFoodsData = mealsData[mealType] as List<dynamic>;
+        if (mealFoodsData.isNotEmpty) {
+          int totalCalories = 0;
+          for (var foodData in mealFoodsData) {
+            final calories = (foodData['calories'] as num?)?.toDouble() ?? 0.0;
+            totalCalories += calories.round();
+          }
+
+          final mealInfo = mealTypeMap[mealType] ?? {'name': mealType, 'time': '12:00', 'icon': Icons.restaurant};
+          
+          mealsList.add({
+            'id': '${mealType}_${_currentMealPlan!['id']}',
+            'name': mealInfo['name'] as String,
+            'time': mealInfo['time'] as String,
+            'calories': totalCalories,
+            'isCompleted': false,
+            'icon': mealInfo['icon'] as IconData,
+          });
+        }
+      }
+    }
+
+    return mealsList;
+  }
+
+  /// Calcula os macros consumidos baseado nas refeições completadas
+  void _calculateNutrition() {
+    _caloriesConsumed = 0;
+    _protein = 0.0;
+    _carbs = 0.0;
+    _fats = 0.0;
+
+    for (final meal in _todayMeals) {
+      if (meal['isCompleted'] == true) {
+        // Se há macros diretos na refeição, usar eles
+        if (meal['protein'] != null || meal['carbs'] != null || meal['fats'] != null) {
+          _caloriesConsumed += meal['calories'] as int? ?? 0;
+          _protein += (meal['protein'] as num?)?.toDouble() ?? 0.0;
+          _carbs += (meal['carbs'] as num?)?.toDouble() ?? 0.0;
+          _fats += (meal['fats'] as num?)?.toDouble() ?? 0.0;
+        } 
+        // Caso contrário, calcular a partir dos alimentos
+        else if (meal['foods'] != null) {
+          final foods = meal['foods'] as List<dynamic>;
+          for (var foodData in foods) {
+            final quantity = (foodData['quantity'] as num?)?.toDouble() ?? 100.0;
+            final food = foodData['food'] as Map<String, dynamic>?;
+            
+            if (food != null) {
+              final baseCalories = (food['calories'] as num?)?.toDouble() ?? 0.0;
+              final baseProtein = (food['protein'] as num?)?.toDouble() ?? 0.0;
+              final baseCarbs = (food['carbs'] as num?)?.toDouble() ?? 0.0;
+              final baseFats = (food['fats'] as num?)?.toDouble() ?? 0.0;
+              
+              // Calcular valores proporcionais à quantidade
+              final multiplier = quantity / 100.0;
+              _caloriesConsumed += (baseCalories * multiplier).round();
+              _protein += baseProtein * multiplier;
+              _carbs += baseCarbs * multiplier;
+              _fats += baseFats * multiplier;
+            }
+          }
+        }
+        // Se não há nem macros nem alimentos, usar apenas calorias
+        else {
+          _caloriesConsumed += meal['calories'] as int? ?? 0;
+        }
+      }
+    }
+
+    // Se não há metas definidas, usar valores padrão baseados em calorias
+    if (_caloriesGoal == 0) {
+      _caloriesGoal = 2000; // Valor padrão
+    }
+    if (_proteinGoal == 0) {
+      _proteinGoal = _caloriesGoal * 0.25 / 4; // 25% de proteína
+    }
+    if (_carbsGoal == 0) {
+      _carbsGoal = _caloriesGoal * 0.45 / 4; // 45% de carboidratos
+    }
+    if (_fatsGoal == 0) {
+      _fatsGoal = _caloriesGoal * 0.30 / 9; // 30% de gorduras
+    }
+  }
+
+  /// Inicia stream para sincronização automática
+  void _startMealsStream() {
+    if (widget.userProfile?.id == null) return;
+
+    _mealsSubscription?.cancel();
+    
+    final today = DateTime.now();
+    _mealsSubscription = _firestoreService.streamDailyMeals(
+      userId: widget.userProfile!.id!,
+      date: today,
+    ).listen(
+      (savedMeals) {
+        if (savedMeals.isNotEmpty && mounted) {
+          setState(() {
+            _todayMeals = savedMeals;
+            _calculateNutrition();
+          });
+        }
+      },
+      onError: (error) {
+        debugPrint('Erro no stream de refeições: $error');
+      },
+    );
+  }
   
   // Obter próximas refeições pendentes
   List<Map<String, dynamic>> get _nextMeals {
@@ -111,12 +382,11 @@ class _HomeScreenState extends State<HomeScreen> {
       case 0:
         return MealsListScreen(userProfile: widget.userProfile);
       case 1:
-        return SafeArea(
-          child: RefreshIndicator(
-            onRefresh: () async {
-              // TODO: Implementar refresh dos dados
-              await Future.delayed(const Duration(seconds: 1));
-            },
+        return _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SafeArea(
+                child: RefreshIndicator(
+                  onRefresh: _loadData,
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
               child: Column(
@@ -135,7 +405,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-        );
+            );
       case 2:
         return _buildProfileScreen();
       default:
@@ -281,7 +551,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   MaterialPageRoute(
                     builder: (_) => DietCalculatorScreen(userProfile: widget.userProfile),
                   ),
-                );
+                ).then((_) => _loadData());
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildProfileMenuItem(
+              icon: Icons.restaurant_menu_outlined,
+              title: 'Meus Planos Alimentares',
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MealPlansListScreen(userProfile: widget.userProfile),
+                  ),
+                ).then((_) => _loadData());
               },
             ),
             const SizedBox(height: 16),
@@ -289,9 +572,10 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.settings_outlined,
               title: 'Configurações',
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Tela de configurações em desenvolvimento'),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsScreen(userProfile: widget.userProfile),
                   ),
                 );
               },
@@ -301,9 +585,10 @@ class _HomeScreenState extends State<HomeScreen> {
               icon: Icons.bar_chart_outlined,
               title: 'Estatísticas',
               onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Tela de estatísticas em desenvolvimento'),
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => StatisticsScreen(userProfile: widget.userProfile),
                   ),
                 );
               },
@@ -454,21 +739,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToHelp() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Ajuda'),
-        content: const Text(
-          'Bem-vindo ao DietaPro!\n\n'
-          'Aqui você pode gerenciar sua dieta, acompanhar suas calorias e macronutrientes, e muito mais.\n\n'
-          'Para mais informações, entre em contato com o suporte.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const HelpScreen(),
       ),
     );
   }
@@ -728,30 +1002,33 @@ class _HomeScreenState extends State<HomeScreen> {
               Expanded(
                 child: _buildMacroCard(
                   label: 'Proteínas',
-                  value: '${_protein}g',
+                  value: '${_protein.toStringAsFixed(0)}g',
                   icon: Icons.fitness_center,
                   color: Colors.blue,
-                  progress: 0.7,
+                  progress: _proteinGoal > 0 ? (_protein / _proteinGoal).clamp(0.0, 1.0) : 0.0,
+                  goal: _proteinGoal > 0 ? '${_proteinGoal.toStringAsFixed(0)}g' : null,
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: _buildMacroCard(
                   label: 'Carboidratos',
-                  value: '${_carbs}g',
+                  value: '${_carbs.toStringAsFixed(0)}g',
                   icon: Icons.breakfast_dining,
                   color: Colors.orange,
-                  progress: 0.6,
+                  progress: _carbsGoal > 0 ? (_carbs / _carbsGoal).clamp(0.0, 1.0) : 0.0,
+                  goal: _carbsGoal > 0 ? '${_carbsGoal.toStringAsFixed(0)}g' : null,
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: _buildMacroCard(
                   label: 'Gorduras',
-                  value: '${_fats}g',
+                  value: '${_fats.toStringAsFixed(0)}g',
                   icon: Icons.water_drop,
                   color: Colors.purple,
-                  progress: 0.5,
+                  progress: _fatsGoal > 0 ? (_fats / _fatsGoal).clamp(0.0, 1.0) : 0.0,
+                  goal: _fatsGoal > 0 ? '${_fatsGoal.toStringAsFixed(0)}g' : null,
                 ),
               ),
             ],
@@ -767,6 +1044,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required IconData icon,
     required Color color,
     required double progress,
+    String? goal,
   }) {
     return Container(
       padding: const EdgeInsets.all(16.0),
@@ -799,6 +1077,17 @@ class _HomeScreenState extends State<HomeScreen> {
             style: Theme.of(context).textTheme.bodySmall,
             textAlign: TextAlign.center,
           ),
+          if (goal != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Meta: $goal',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.grey.shade600,
+                    fontSize: 10,
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ],
           const SizedBox(height: 8),
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
@@ -835,7 +1124,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: 'Água',
                   color: Colors.blue,
                   onTap: () {
-                    _showWaterDialog();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => WaterTrackingScreen(userProfile: widget.userProfile),
+                      ),
+                    ).then((_) => _loadData());
                   },
                 ),
               ),
@@ -846,7 +1140,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: 'Adicionar\nRefeição',
                   color: AppTheme.primaryColor,
                   onTap: () {
-                    _showAddMealDialog();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MealsListScreen(userProfile: widget.userProfile),
+                      ),
+                    ).then((_) => _loadData());
                   },
                 ),
               ),
@@ -857,7 +1156,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   label: 'Peso',
                   color: AppTheme.accentColor,
                   onTap: () {
-                    _showWeightDialog();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => WeightTrackingScreen(userProfile: widget.userProfile),
+                      ),
+                    );
                   },
                 ),
               ),
@@ -970,16 +1274,19 @@ class _HomeScreenState extends State<HomeScreen> {
               final meal = entry.value;
               // Encontrar o índice original na lista completa para editar o horário
               final originalIndex = _todayMeals.indexWhere((m) => 
-                m['meal'] == meal['meal'] && m['time'] == meal['time']
+                (m['name'] == meal['name'] || m['meal'] == meal['meal']) && m['time'] == meal['time']
               );
+              // Garantir que sempre temos um ícone válido
+              final mealIcon = meal['icon'] as IconData? ?? Icons.restaurant;
+              
               return Padding(
                 padding: EdgeInsets.only(bottom: index < nextMeals.length - 1 ? 16 : 0),
                 child: _buildMealItem(
-                  icon: meal['icon'] as IconData,
-                  meal: meal['meal'] as String,
-                  calories: meal['calories'] as int,
+                  icon: mealIcon,
+                  meal: meal['name'] as String? ?? meal['meal'] as String? ?? 'Refeição',
+                  calories: meal['calories'] as int? ?? 0,
                   time: meal['time'] as String,
-                  isCompleted: meal['isCompleted'] as bool,
+                  isCompleted: meal['isCompleted'] as bool? ?? false,
                   onTimeEdit: originalIndex >= 0 ? () => _editMealTime(originalIndex) : null,
                 ),
               );
@@ -1093,55 +1400,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _showAddMealDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Adicionar Refeição'),
-        content: const Text('Funcionalidade em desenvolvimento'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showWaterDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Registrar Água'),
-        content: const Text('Funcionalidade em desenvolvimento'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showWeightDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Registrar Peso'),
-        content: const Text('Funcionalidade em desenvolvimento'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
 
   Future<void> _editMealTime(int index) async {
+    if (widget.userProfile?.id == null) return;
+    
     final meal = _todayMeals[index];
     final currentTime = meal['time'] as String;
     
@@ -1161,10 +1423,31 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (picked != null) {
+      final formattedTime = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+      
       setState(() {
-        final formattedTime = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
         _todayMeals[index]['time'] = formattedTime;
       });
+
+      // Salvar no Firestore
+      try {
+        final today = DateTime.now();
+        await _firestoreService.saveDailyMeals(
+          userId: widget.userProfile!.id!,
+          date: today,
+          meals: _todayMeals,
+        );
+      } catch (e) {
+        debugPrint('Erro ao salvar horário da refeição: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro ao salvar horário: ${e.toString()}'),
+              backgroundColor: AppTheme.errorColor,
+            ),
+          );
+        }
+      }
     }
   }
 }

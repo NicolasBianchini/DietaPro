@@ -31,6 +31,10 @@ class UserProfile {
   ActivityLevel? activityLevel;
   Goal? goal;
   int? mealsPerDay; // Número de refeições por dia (padrão: 5)
+  List<String>? dietaryRestrictions; // Restrições alimentares comuns (checkboxes)
+  String? customDietaryRestrictions; // Restrições alimentares customizadas (texto livre)
+  bool? termsAccepted; // Confirmação de aceite de termos
+  DateTime? termsAcceptedAt; // Data de aceite de termos
   DateTime? createdAt;
   DateTime? updatedAt;
 
@@ -45,6 +49,10 @@ class UserProfile {
     this.activityLevel,
     this.goal,
     this.mealsPerDay,
+    this.dietaryRestrictions,
+    this.customDietaryRestrictions,
+    this.termsAccepted,
+    this.termsAcceptedAt,
     this.createdAt,
     this.updatedAt,
   });
@@ -83,6 +91,10 @@ class UserProfile {
       if (activityLevel != null) 'activityLevel': activityLevel!.name,
       if (goal != null) 'goal': goal!.name,
       if (mealsPerDay != null) 'mealsPerDay': mealsPerDay,
+      if (dietaryRestrictions != null && dietaryRestrictions!.isNotEmpty) 'dietaryRestrictions': dietaryRestrictions,
+      if (customDietaryRestrictions != null && customDietaryRestrictions!.isNotEmpty) 'customDietaryRestrictions': customDietaryRestrictions,
+      if (termsAccepted != null) 'termsAccepted': termsAccepted,
+      if (termsAcceptedAt != null) 'termsAcceptedAt': termsAcceptedAt!.toIso8601String(),
       if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
     };
@@ -121,9 +133,36 @@ class UserProfile {
         (e) => e.name == map['goal'],
       ) : null,
       mealsPerDay: map['mealsPerDay']?.toInt(),
+      dietaryRestrictions: _parseDietaryRestrictions(map['dietaryRestrictions']),
+      customDietaryRestrictions: map['customDietaryRestrictions'] as String?,
+      termsAccepted: map['termsAccepted'] as bool?,
+      termsAcceptedAt: parseTimestamp(map['termsAcceptedAt']),
       createdAt: parseTimestamp(map['createdAt']),
       updatedAt: parseTimestamp(map['updatedAt']),
     );
+  }
+
+  // Método auxiliar para parsear restrições alimentares
+  static List<String>? _parseDietaryRestrictions(dynamic value) {
+    if (value == null) return null;
+    
+    // Se já é uma List, converter diretamente
+    if (value is List) {
+      try {
+        return value.map((e) => e.toString()).toList();
+      } catch (e) {
+        return null;
+      }
+    }
+    
+    // Se é uma String, retornar null (dados antigos/inválidos)
+    // Não tentamos converter String para List para evitar erros
+    if (value is String) {
+      return null;
+    }
+    
+    // Para qualquer outro tipo, retornar null
+    return null;
   }
 
   // Verificar se o perfil está completo
