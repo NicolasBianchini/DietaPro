@@ -10,11 +10,13 @@ import '../../theme/app_theme.dart';
 class OnboardingWrapper extends StatefulWidget {
   final String email;
   final String name;
+  final String? userId; // ID do usuário já criado no registro
 
   const OnboardingWrapper({
     super.key,
     required this.email,
     required this.name,
+    this.userId, // Opcional para compatibilidade
   });
 
   @override
@@ -29,9 +31,13 @@ class _OnboardingWrapperState extends State<OnboardingWrapper> {
   void initState() {
     super.initState();
     _userProfile = UserProfile(
+      id: widget.userId, // Usar o ID passado do registro
       email: widget.email,
       name: widget.name,
     );
+    
+    // Se tem ID, é uma atualização, não uma criação nova
+    debugPrint('🎯 Onboarding iniciado com ID: ${widget.userId}');
   }
 
   void _nextStep() {

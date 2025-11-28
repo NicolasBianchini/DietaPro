@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
-import '../services/auth_service.dart';
 import '../models/user_profile.dart';
 import 'login_screen.dart';
 import 'onboarding/onboarding_wrapper.dart';
@@ -52,33 +53,46 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
 
       try {
-        final authService = AuthService();
         final firestoreService = FirestoreService();
         final email = _emailController.text.trim();
         final name = _nameController.text.trim();
         final password = _passwordController.text;
 
-        // Criar conta no Firebase Auth
-        final userCredential = await authService.createUserWithEmailAndPassword(
+        // Verificar se email já existe
+        final existingProfile = await firestoreService.getUserProfileByEmail(email);
+        if (existingProfile != null) {
+          throw Exception('Este email já está cadastrado.');
+        }
+
+        // Criar hash da senha
+        final bytes = utf8.encode(password);
+        final digest = sha256.convert(bytes);
+        final passwordHash = digest.toString();
+
+        // Criar perfil do usuário no Firestore (SEM Firebase Auth)
+        final userProfile = UserProfile(
+          id: null, // Será gerado pelo Firestore
           email: email,
-          password: password,
           name: name,
+          passwordHash: passwordHash, // Incluir hash da senha
+          termsAccepted: _acceptTerms,
+          termsAcceptedAt: _acceptTerms ? DateTime.now() : null,
+          createdAt: DateTime.now(),
         );
 
-        // O AuthService já salva o perfil inicial, mas vamos garantir
-        // que o perfil está salvo com o ID correto do Firebase Auth
-        if (userCredential.user?.uid != null) {
-          final userProfile = UserProfile(
-            id: userCredential.user!.uid,
-            email: email,
-            name: name,
-            termsAccepted: _acceptTerms,
-            termsAcceptedAt: _acceptTerms ? DateTime.now() : null,
-            createdAt: DateTime.now(),
-          );
-
-          await firestoreService.saveUserProfile(userProfile);
-        }
+        // Salvar perfil com senha hash e obter ID
+        final userId = await firestoreService.saveUserProfile(userProfile);
+        
+        // Atualizar o perfil com o ID gerado para passar ao onboarding
+        final savedProfile = UserProfile(
+          id: userId,
+          email: email,
+          name: name,
+          passwordHash: passwordHash,
+          termsAccepted: _acceptTerms,
+          termsAcceptedAt: _acceptTerms ? DateTime.now() : null,
+          createdAt: DateTime.now(),
+        );
 
         if (mounted) {
           setState(() {
@@ -86,11 +100,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
           });
 
           // Navegar para o onboarding após registro
+          // Passar o perfil completo com ID para evitar duplicação
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
               builder: (_) => OnboardingWrapper(
                 email: email,
                 name: name,
+                userId: userId, // Passar o ID para o onboarding usar
               ),
             ),
           );

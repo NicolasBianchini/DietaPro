@@ -802,6 +802,66 @@ class FirestoreService {
     }
   }
 
+  // ==================== SELECTED MEAL PLAN ====================
+
+  /// Salva o ID do plano alimentar atualmente selecionado pelo usuário
+  Future<void> saveSelectedMealPlanId({
+    required String userId,
+    required String mealPlanId,
+  }) async {
+    try {
+      final settingsRef = _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('settings')
+          .doc('user_settings');
+
+      await settingsRef.set({
+        'selectedMealPlanId': mealPlanId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      throw Exception('Erro ao salvar plano selecionado: $e');
+    }
+  }
+
+  /// Busca o ID do plano alimentar atualmente selecionado pelo usuário
+  Future<String?> getSelectedMealPlanId(String userId) async {
+    try {
+      final doc = await _firestore
+          .collection('users')
+          .doc(userId)
+          .collection('settings')
+          .doc('user_settings')
+          .get();
+
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        return data['selectedMealPlanId'] as String?;
+      }
+      return null;
+    } catch (e) {
+      throw Exception('Erro ao buscar plano selecionado: $e');
+    }
+  }
+
+  /// Stream do plano alimentar selecionado (para sincronização em tempo real)
+  Stream<String?> streamSelectedMealPlanId(String userId) {
+    return _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('settings')
+        .doc('user_settings')
+        .snapshots()
+        .map((doc) {
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        return data['selectedMealPlanId'] as String?;
+      }
+      return null;
+    });
+  }
+
   // ==================== TERMS ACCEPTANCE ====================
 
   /// Salva o aceite dos termos e condições pelo usuário

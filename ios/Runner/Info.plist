@@ -66,5 +66,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>DietaPro precisa acessar sua câmera para tirar foto de perfil</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>DietaPro precisa acessar sua galeria de fotos para escolher foto de perfil</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>DietaPro precisa acessar sua galeria de fotos</string>
 </dict>
 </plist>

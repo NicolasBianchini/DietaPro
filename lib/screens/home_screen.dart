@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../models/user_profile.dart';
 import '../services/firestore_service.dart';
+import '../services/storage_service.dart';
 import 'login_screen.dart';
 import 'diet_calculator_screen.dart';
 import 'meals_list_screen.dart';
@@ -29,6 +32,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final FirestoreService _firestoreService = FirestoreService();
+  final StorageService _storageService = StorageService();
+  final ImagePicker _imagePicker = ImagePicker();
   
   // Dados reais do Firestore
   int _caloriesConsumed = 0;
@@ -47,16 +52,19 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _todayMeals = [];
   Map<String, dynamic>? _currentMealPlan;
   StreamSubscription<List<Map<String, dynamic>>>? _mealsSubscription;
+  StreamSubscription<String?>? _selectedPlanSubscription;
   
   @override
   void initState() {
     super.initState();
     _loadData();
+    _startSelectedPlanStream();
   }
 
   @override
   void dispose() {
     _mealsSubscription?.cancel();
+    _selectedPlanSubscription?.cancel();
     super.dispose();
   }
 
@@ -89,25 +97,38 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Carrega o plano alimentar atual
+  /// Carrega o plano alimentar atual (o plano selecionado pelo usuário)
   Future<void> _loadMealPlan() async {
     if (widget.userProfile?.id == null) return;
 
     try {
-      final mealPlans = await _firestoreService.getUserMealPlans(widget.userProfile!.id!);
+      // Buscar o ID do plano selecionado
+      final selectedPlanId = await _firestoreService.getSelectedMealPlanId(widget.userProfile!.id!);
       
-      if (mealPlans.isNotEmpty) {
-        // Usar o plano mais recente
-        _currentMealPlan = mealPlans.first;
+      if (selectedPlanId != null) {
+        // Carregar o plano selecionado
+        _currentMealPlan = await _firestoreService.getMealPlan(selectedPlanId);
+      } else {
+        // Se não há plano selecionado, usar o mais recente
+        final mealPlans = await _firestoreService.getUserMealPlans(widget.userProfile!.id!);
         
-        // Carregar metas nutricionais do plano
-        if (_currentMealPlan!['nutritionData'] != null) {
-          final nutritionData = _currentMealPlan!['nutritionData'] as Map<String, dynamic>;
-          _caloriesGoal = (nutritionData['calories'] as num?)?.toInt() ?? 0;
-          _proteinGoal = (nutritionData['protein'] as num?)?.toDouble() ?? 0.0;
-          _carbsGoal = (nutritionData['carbs'] as num?)?.toDouble() ?? 0.0;
-          _fatsGoal = (nutritionData['fats'] as num?)?.toDouble() ?? 0.0;
+        if (mealPlans.isNotEmpty) {
+          _currentMealPlan = mealPlans.first;
+          // Salvar como plano selecionado
+          await _firestoreService.saveSelectedMealPlanId(
+            userId: widget.userProfile!.id!,
+            mealPlanId: mealPlans.first['id'] as String,
+          );
         }
+      }
+      
+      // Carregar metas nutricionais do plano
+      if (_currentMealPlan != null && _currentMealPlan!['nutritionData'] != null) {
+        final nutritionData = _currentMealPlan!['nutritionData'] as Map<String, dynamic>;
+        _caloriesGoal = (nutritionData['calories'] as num?)?.toInt() ?? 0;
+        _proteinGoal = (nutritionData['protein'] as num?)?.toDouble() ?? 0.0;
+        _carbsGoal = (nutritionData['carbs'] as num?)?.toDouble() ?? 0.0;
+        _fatsGoal = (nutritionData['fats'] as num?)?.toDouble() ?? 0.0;
       }
     } catch (e) {
       debugPrint('Erro ao carregar plano alimentar: $e');
@@ -128,12 +149,30 @@ class _HomeScreenState extends State<HomeScreen> {
         date: today,
       );
 
-      // Se há refeições salvas, usar elas e garantir que têm ícones
+      final currentPlanId = _currentMealPlan!['id'] as String;
+      
+      // Verificar se há refeições salvas E se são da dieta atual
       if (savedMeals.isNotEmpty) {
-        _todayMeals = _ensureMealsHaveIcons(savedMeals);
+        // Filtrar apenas refeições que pertencem à dieta atual
+        final mealsFromCurrentPlan = savedMeals.where((meal) {
+          final mealId = meal['id'] as String?;
+          // Verificar se o ID da refeição contém o ID do plano atual
+          return mealId != null && mealId.contains(currentPlanId);
+        }).toList();
+        
+        if (mealsFromCurrentPlan.isNotEmpty) {
+          // Usar refeições salvas da dieta atual
+          _todayMeals = _ensureMealsHaveIcons(mealsFromCurrentPlan);
+          debugPrint('✅ Carregadas ${mealsFromCurrentPlan.length} refeições da dieta atual');
+        } else {
+          // Nenhuma refeição da dieta atual, criar novas
+          _todayMeals = _createMealsFromPlan();
+          debugPrint('🆕 Criadas novas refeições do plano (nenhuma salva da dieta atual)');
+        }
       } else {
         // Caso contrário, criar refeições baseadas no plano
         _todayMeals = _createMealsFromPlan();
+        debugPrint('🆕 Criadas novas refeições do plano (nenhuma salva)');
       }
     } catch (e) {
       debugPrint('Erro ao carregar refeições do dia: $e');
@@ -327,7 +366,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Inicia stream para sincronização automática
+  /// Inicia stream para sincronização automática das refeições
   void _startMealsStream() {
     if (widget.userProfile?.id == null) return;
 
@@ -339,15 +378,51 @@ class _HomeScreenState extends State<HomeScreen> {
       date: today,
     ).listen(
       (savedMeals) {
-        if (savedMeals.isNotEmpty && mounted) {
-          setState(() {
-            _todayMeals = savedMeals;
-            _calculateNutrition();
-          });
+        if (savedMeals.isNotEmpty && mounted && _currentMealPlan != null) {
+          final currentPlanId = _currentMealPlan!['id'] as String;
+          
+          // Filtrar apenas refeições da dieta atual
+          final mealsFromCurrentPlan = savedMeals.where((meal) {
+            final mealId = meal['id'] as String?;
+            return mealId != null && mealId.contains(currentPlanId);
+          }).toList();
+          
+          // Só atualizar se houver refeições da dieta atual
+          if (mealsFromCurrentPlan.isNotEmpty) {
+            setState(() {
+              _todayMeals = mealsFromCurrentPlan;
+              _calculateNutrition();
+            });
+          }
         }
       },
       onError: (error) {
         debugPrint('Erro no stream de refeições: $error');
+      },
+    );
+  }
+
+  /// Inicia stream para sincronização do plano selecionado
+  void _startSelectedPlanStream() {
+    if (widget.userProfile?.id == null) return;
+
+    _selectedPlanSubscription?.cancel();
+    
+    _selectedPlanSubscription = _firestoreService
+        .streamSelectedMealPlanId(widget.userProfile!.id!)
+        .listen(
+      (selectedPlanId) async {
+        if (selectedPlanId != null && mounted) {
+          // Se o plano selecionado mudou, recarregar os dados
+          final currentPlanId = _currentMealPlan?['id'] as String?;
+          if (currentPlanId != selectedPlanId) {
+            debugPrint('🔄 Plano selecionado mudou: $selectedPlanId');
+            await _loadData();
+          }
+        }
+      },
+      onError: (error) {
+        debugPrint('Erro no stream do plano selecionado: $error');
       },
     );
   }
@@ -486,35 +561,72 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             const SizedBox(height: 32),
-            // Avatar
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: AppTheme.primaryColor,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white,
-                  width: 4,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
+            // Avatar com foto
+            Stack(
+              children: [
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white,
+                      width: 4,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                    image: widget.userProfile?.photoURL != null
+                        ? DecorationImage(
+                            image: NetworkImage(widget.userProfile!.photoURL!),
+                            fit: BoxFit.cover,
+                          )
+                        : null,
                   ),
-                ],
-              ),
-              child: Center(
-                child: Text(
-                  initials,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 48,
+                  child: widget.userProfile?.photoURL == null
+                      ? Center(
+                          child: Text(
+                            initials,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 48,
+                            ),
+                          ),
+                        )
+                      : null,
+                ),
+                // Botão de editar foto
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: GestureDetector(
+                    onTap: _showPhotoOptions,
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryColor,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white,
+                          width: 2,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.camera_alt,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
             const SizedBox(height: 24),
             // Nome
@@ -1460,6 +1572,258 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           );
         }
+      }
+    }
+  }
+
+  /// Mostra opções para selecionar foto (câmera ou galeria)
+  void _showPhotoOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Foto de Perfil',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.camera_alt, color: AppTheme.primaryColor),
+                ),
+                title: const Text('Tirar Foto'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.photo_library, color: AppTheme.primaryColor),
+                ),
+                title: const Text('Escolher da Galeria'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+              if (widget.userProfile?.photoURL != null)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.delete, color: Colors.red),
+                  ),
+                  title: const Text('Remover Foto'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _removePhoto();
+                  },
+                ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Seleciona e faz upload da foto
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? pickedFile = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+
+      if (pickedFile == null) return;
+
+      // Mostrar loading
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      // Fazer upload
+      final String photoURL = await _storageService.updateProfilePhoto(
+        userId: widget.userProfile!.id!,
+        imageFile: File(pickedFile.path),
+        oldPhotoURL: widget.userProfile?.photoURL,
+      );
+
+      // Atualizar perfil no Firestore
+      final updatedProfile = UserProfile(
+        id: widget.userProfile!.id,
+        email: widget.userProfile!.email,
+        name: widget.userProfile!.name,
+        gender: widget.userProfile!.gender,
+        dateOfBirth: widget.userProfile!.dateOfBirth,
+        height: widget.userProfile!.height,
+        weight: widget.userProfile!.weight,
+        activityLevel: widget.userProfile!.activityLevel,
+        goal: widget.userProfile!.goal,
+        mealsPerDay: widget.userProfile!.mealsPerDay,
+        passwordHash: widget.userProfile!.passwordHash,
+        photoURL: photoURL, // Nova foto!
+        termsAccepted: widget.userProfile!.termsAccepted,
+        termsAcceptedAt: widget.userProfile!.termsAcceptedAt,
+        createdAt: widget.userProfile!.createdAt,
+        updatedAt: DateTime.now(),
+      );
+
+      await _firestoreService.saveUserProfile(updatedProfile);
+
+      // Fechar loading
+      if (mounted) {
+        Navigator.pop(context);
+
+        // Atualizar a tela
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomeScreen(userProfile: updatedProfile),
+          ),
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Foto de perfil atualizada!'),
+            backgroundColor: AppTheme.primaryColor,
+          ),
+        );
+      }
+    } catch (e) {
+      // Fechar loading se estiver aberto
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      debugPrint('Erro ao atualizar foto: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao atualizar foto: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Remove a foto de perfil
+  Future<void> _removePhoto() async {
+    try {
+      // Mostrar loading
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      // Deletar foto do Storage
+      if (widget.userProfile?.photoURL != null) {
+        await _storageService.deleteProfilePhoto(widget.userProfile!.photoURL!);
+      }
+
+      // Atualizar perfil no Firestore (remover photoURL)
+      final updatedProfile = UserProfile(
+        id: widget.userProfile!.id,
+        email: widget.userProfile!.email,
+        name: widget.userProfile!.name,
+        gender: widget.userProfile!.gender,
+        dateOfBirth: widget.userProfile!.dateOfBirth,
+        height: widget.userProfile!.height,
+        weight: widget.userProfile!.weight,
+        activityLevel: widget.userProfile!.activityLevel,
+        goal: widget.userProfile!.goal,
+        mealsPerDay: widget.userProfile!.mealsPerDay,
+        passwordHash: widget.userProfile!.passwordHash,
+        photoURL: null, // Sem foto!
+        termsAccepted: widget.userProfile!.termsAccepted,
+        termsAcceptedAt: widget.userProfile!.termsAcceptedAt,
+        createdAt: widget.userProfile!.createdAt,
+        updatedAt: DateTime.now(),
+      );
+
+      await _firestoreService.saveUserProfile(updatedProfile);
+
+      // Fechar loading
+      if (mounted) {
+        Navigator.pop(context);
+
+        // Atualizar a tela
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomeScreen(userProfile: updatedProfile),
+          ),
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Foto removida!'),
+            backgroundColor: AppTheme.primaryColor,
+          ),
+        );
+      }
+    } catch (e) {
+      // Fechar loading se estiver aberto
+      if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+
+      debugPrint('Erro ao remover foto: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao remover foto: ${e.toString()}'),
+            backgroundColor: AppTheme.errorColor,
+          ),
+        );
       }
     }
   }

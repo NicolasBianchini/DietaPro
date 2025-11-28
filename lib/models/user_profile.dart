@@ -35,6 +35,8 @@ class UserProfile {
   String? customDietaryRestrictions; // Restrições alimentares customizadas (texto livre)
   bool? termsAccepted; // Confirmação de aceite de termos
   DateTime? termsAcceptedAt; // Data de aceite de termos
+  String? passwordHash; // Hash da senha (SHA-256) - armazenado no Firestore
+  String? photoURL; // URL da foto de perfil no Firebase Storage
   DateTime? createdAt;
   DateTime? updatedAt;
 
@@ -53,6 +55,8 @@ class UserProfile {
     this.customDietaryRestrictions,
     this.termsAccepted,
     this.termsAcceptedAt,
+    this.passwordHash,
+    this.photoURL,
     this.createdAt,
     this.updatedAt,
   });
@@ -95,6 +99,8 @@ class UserProfile {
       if (customDietaryRestrictions != null && customDietaryRestrictions!.isNotEmpty) 'customDietaryRestrictions': customDietaryRestrictions,
       if (termsAccepted != null) 'termsAccepted': termsAccepted,
       if (termsAcceptedAt != null) 'termsAcceptedAt': termsAcceptedAt!.toIso8601String(),
+      if (passwordHash != null && passwordHash!.isNotEmpty) 'passwordHash': passwordHash,
+      if (photoURL != null && photoURL!.isNotEmpty) 'photoURL': photoURL,
       if (createdAt != null) 'createdAt': createdAt!.toIso8601String(),
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
     };
@@ -137,6 +143,8 @@ class UserProfile {
       customDietaryRestrictions: map['customDietaryRestrictions'] as String?,
       termsAccepted: map['termsAccepted'] as bool?,
       termsAcceptedAt: parseTimestamp(map['termsAcceptedAt']),
+      passwordHash: map['passwordHash'] as String?,
+      photoURL: map['photoURL'] as String?,
       createdAt: parseTimestamp(map['createdAt']),
       updatedAt: parseTimestamp(map['updatedAt']),
     );

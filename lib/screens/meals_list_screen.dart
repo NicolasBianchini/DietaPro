@@ -55,11 +55,36 @@ class _MealsListScreenState extends State<MealsListScreen> {
       final mealPlans = await _firestoreService.getUserMealPlans(widget.userProfile!.id!);
       
       if (mealPlans.isNotEmpty) {
+        // Buscar o plano selecionado pelo usuário
+        final selectedPlanId = await _firestoreService.getSelectedMealPlanId(widget.userProfile!.id!);
+        
+        // Verificar se o plano selecionado existe na lista
+        Map<String, dynamic>? selectedPlan;
+        if (selectedPlanId != null) {
+          try {
+            selectedPlan = mealPlans.firstWhere((plan) => plan['id'] == selectedPlanId);
+          } catch (e) {
+            // Se não encontrar, usar o primeiro
+            selectedPlan = null;
+          }
+        }
+        
+        // Se não há plano selecionado ou ele não existe mais, usar o primeiro
+        if (selectedPlan == null) {
+          selectedPlan = mealPlans.first;
+          // Salvar como plano selecionado
+          await _firestoreService.saveSelectedMealPlanId(
+            userId: widget.userProfile!.id!,
+            mealPlanId: mealPlans.first['id'] as String,
+          );
+        }
+        
         setState(() {
           _availableDiets = mealPlans;
-          _selectedDietId = mealPlans.first['id'] as String;
+          _selectedDietId = selectedPlan!['id'] as String;
         });
-        await _loadMealsFromPlan(mealPlans.first);
+        
+        await _loadMealsFromPlan(selectedPlan);
         _startMealsStream();
       } else {
         setState(() {
@@ -347,18 +372,62 @@ class _MealsListScreenState extends State<MealsListScreen> {
           if (_availableDiets.isNotEmpty)
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert),
+              tooltip: 'Selecionar dieta',
               onSelected: (dietId) async {
                 setState(() {
                   _selectedDietId = dietId;
                 });
+                
+                // Salvar a dieta selecionada no Firestore
+                if (widget.userProfile?.id != null) {
+                  try {
+                    await _firestoreService.saveSelectedMealPlanId(
+                      userId: widget.userProfile!.id!,
+                      mealPlanId: dietId,
+                    );
+                    debugPrint('✅ Dieta selecionada salva: $dietId');
+                  } catch (e) {
+                    debugPrint('❌ Erro ao salvar dieta selecionada: $e');
+                  }
+                }
+                
                 final selectedDiet = _availableDiets.firstWhere((d) => d['id'] == dietId);
                 await _loadMealsFromPlan(selectedDiet);
                 _startMealsStream();
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Dieta "${selectedDiet['dietName']}" selecionada'),
+                      backgroundColor: AppTheme.primaryColor,
+                      duration: const Duration(seconds: 2),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
               },
               itemBuilder: (context) => _availableDiets.map((diet) {
+                final isSelected = diet['id'] == _selectedDietId;
                 return PopupMenuItem<String>(
                   value: diet['id'] as String,
-                  child: Text(diet['dietName'] as String? ?? 'Dieta sem nome'),
+                  child: Row(
+                    children: [
+                      if (isSelected)
+                        Icon(Icons.check_circle, color: AppTheme.primaryColor, size: 20)
+                      else
+                        const SizedBox(width: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          diet['dietName'] as String? ?? 'Dieta sem nome',
+                          style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? AppTheme.primaryColor : null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 );
               }).toList(),
             ),

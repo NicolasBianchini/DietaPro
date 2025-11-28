@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 import '../theme/app_theme.dart';
 import '../services/firestore_service.dart';
 import 'register_screen.dart';
@@ -38,25 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final email = _emailController.text.trim();
         final password = _passwordController.text;
 
-        // ⚠️ TEMPORÁRIO: Login sem validação de senha
-        // TODO: Configurar Firebase Auth corretamente e reativar validação
-        // 
-        // Para configurar o Firebase Auth:
-        // 1. Acesse https://console.firebase.google.com
-        // 2. Vá em Authentication > Sign-in method
-        // 3. Habilite "Email/Password"
-        // 4. Execute: flutter pub run flutter_launcher_icons
-        // 5. Descomente o código abaixo:
-        
-        /*
-        final authService = AuthService();
-        await authService.signInWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-        */
-
-        // Buscar perfil do usuário no Firestore
+        // Buscar perfil do usuário no Firestore (SEM Firebase Auth)
         final userProfile = await firestoreService.getUserProfileByEmail(email);
 
         if (mounted) {
@@ -73,23 +57,75 @@ class _LoginScreenState extends State<LoginScreen> {
                 duration: Duration(seconds: 4),
               ),
             );
-          } else if (!userProfile.isComplete) {
-            // Perfil incompleto, ir para onboarding
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => OnboardingWrapper(
-                  email: email,
-                  name: userProfile.name,
-                ),
-              ),
-            );
           } else {
-            // Perfil completo, ir para home
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                builder: (_) => HomeScreen(userProfile: userProfile),
-              ),
-            );
+            // SEMPRE verificar senha - segurança obrigatória
+            final savedPasswordHash = userProfile.passwordHash;
+            
+            // Se não tem senha salva, usuário precisa criar uma nova conta
+            if (savedPasswordHash == null || savedPasswordHash.isEmpty) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text(
+                    'Esta conta foi criada antes da atualização de segurança.\n'
+                    'Por favor, crie uma nova conta ou entre em contato com o suporte.'
+                  ),
+                  backgroundColor: Colors.orange,
+                  duration: const Duration(seconds: 6),
+                  action: SnackBarAction(
+                    label: 'Criar Conta',
+                    textColor: Colors.white,
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const RegisterScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              );
+              return;
+            }
+            
+            // Criar hash da senha digitada para comparar
+            final bytes = utf8.encode(password);
+            final digest = sha256.convert(bytes);
+            final passwordHash = digest.toString();
+            
+            // Comparar hashes
+            if (passwordHash != savedPasswordHash) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('❌ Senha incorreta.'),
+                  backgroundColor: Colors.red,
+                  duration: Duration(seconds: 3),
+                ),
+              );
+              return;
+            }
+            
+            // ✅ Senha correta - Login bem-sucedido!
+            debugPrint('✅ Login bem-sucedido: ${userProfile.email}');
+            
+            if (!userProfile.isComplete) {
+              // Perfil incompleto, ir para onboarding
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => OnboardingWrapper(
+                    email: email,
+                    name: userProfile.name,
+                    userId: userProfile.id, // Passar ID para não duplicar
+                  ),
+                ),
+              );
+            } else {
+              // Perfil completo, ir para home
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => HomeScreen(userProfile: userProfile),
+                ),
+              );
+            }
           }
         }
       } catch (e) {
@@ -290,4 +326,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-
