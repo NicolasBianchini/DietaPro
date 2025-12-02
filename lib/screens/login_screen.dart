@@ -37,10 +37,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
       try {
         final firestoreService = FirestoreService();
-        final email = _emailController.text.trim();
+        // Normalizar email para lowercase (case-insensitive)
+        final email = _emailController.text.trim().toLowerCase();
         final password = _passwordController.text;
 
         // Buscar perfil do usuário no Firestore (SEM Firebase Auth)
+        // A busca já é case-insensitive no FirestoreService
         final userProfile = await firestoreService.getUserProfileByEmail(email);
 
         if (mounted) {

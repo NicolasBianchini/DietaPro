@@ -434,6 +434,8 @@ Responda em português brasileiro de forma clara, objetiva e motivadora.
     required String goal,
     int mealsPerDay = 5,
     String? dietaryRestrictions,
+    double? weight,
+    double? height,
   }) async {
     final prompt = '''
 Você é um nutricionista especializado em criar planos alimentares usando EXCLUSIVAMENTE alimentos da Tabela TACO (Tabela Brasileira de Composição de Alimentos - 4ª edição).
@@ -443,6 +445,8 @@ Referência: https://cfn.org.br/wp-content/uploads/2017/03/taco_4_edicao_ampliad
 Perfil do usuário:
 - Gênero: $gender
 - Idade: $age anos
+${weight != null ? '- Peso: ${weight.toStringAsFixed(1)} kg' : ''}
+${height != null ? '- Altura: ${height.toStringAsFixed(0)} cm' : ''}
 - Nível de atividade: $activityLevel
 - Objetivo: $goal
 

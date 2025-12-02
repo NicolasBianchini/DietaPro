@@ -46,21 +46,29 @@ class FirestoreService {
     }
   }
 
-  /// Busca o perfil do usuário por email
+  /// Busca o perfil do usuário por email (case-insensitive)
   Future<UserProfile?> getUserProfileByEmail(String email) async {
     try {
+      // Normalizar email para lowercase para busca case-insensitive
+      final normalizedEmail = email.trim().toLowerCase();
+      
+      // Buscar todos os usuários e filtrar em memória (case-insensitive)
+      // Nota: Firestore não suporta busca case-insensitive diretamente
       final querySnapshot = await _firestore
           .collection('users')
-          .where('email', isEqualTo: email)
-          .limit(1)
           .get();
 
-      if (querySnapshot.docs.isNotEmpty) {
-        final doc = querySnapshot.docs.first;
+      // Filtrar em memória comparando emails em lowercase
+      for (var doc in querySnapshot.docs) {
         final data = doc.data();
-        data['id'] = doc.id; // Garantir que o ID está presente
-        return UserProfile.fromMap(data);
+        final userEmail = (data['email'] as String? ?? '').trim().toLowerCase();
+        
+        if (userEmail == normalizedEmail) {
+          data['id'] = doc.id; // Garantir que o ID está presente
+          return UserProfile.fromMap(data);
+        }
       }
+      
       return null;
     } catch (e) {
       throw Exception('Erro ao buscar perfil por email: $e');

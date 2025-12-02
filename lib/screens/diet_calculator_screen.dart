@@ -358,6 +358,8 @@ class _DietCalculatorScreenState extends State<DietCalculatorScreen> {
         goal: goalText,
         mealsPerDay: mealsPerDay,
         dietaryRestrictions: restrictionsText.isNotEmpty ? restrictionsText : null,
+        weight: widget.userProfile!.weight,
+        height: widget.userProfile!.height,
       );
 
       // Processar e adicionar alimentos às refeições

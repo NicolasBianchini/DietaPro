@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Fotos de perfil
+    match /profile_photos/{fileName} {
+      // Permitir leitura para todos (fotos públicas)
+      allow read: if true;
+      
+      // Permitir escrita e delete sem autenticação
+      // Como o app usa apenas Firestore (sem Firebase Auth),
+      // permitimos uploads sem autenticação
+      // Validações básicas de segurança:
+      // - Apenas imagens (jpg, jpeg, png, heic, heif, webp)
+      // - Tamanho máximo de 5MB
+      // - Apenas na pasta profile_photos
+      allow write: if request.resource.size < 5 * 1024 * 1024  // Máximo 5MB
+        && request.resource.contentType.matches('image/.*')
+        && fileName.matches('profile_.*\\.(jpg|jpeg|png|heic|heif|webp)');
+      
+      allow delete: if fileName.matches('profile_.*\\.(jpg|jpeg|png|heic|heif|webp)');
+    }
+    
+    // Negar acesso a todos os outros arquivos por padrão
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

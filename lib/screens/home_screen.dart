@@ -799,11 +799,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: AppTheme.primaryColor,
                     ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                _getGreeting(),
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
             ],
           ),
           _buildProfileButton(),
@@ -848,17 +843,25 @@ class _HomeScreenState extends State<HomeScreen> {
               offset: const Offset(0, 2),
             ),
           ],
+          image: widget.userProfile?.photoURL != null
+              ? DecorationImage(
+                  image: NetworkImage(widget.userProfile!.photoURL!),
+                  fit: BoxFit.cover,
+                )
+              : null,
         ),
-        child: Center(
-          child: Text(
-            initials,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
-        ),
+        child: widget.userProfile?.photoURL == null
+            ? Center(
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+              )
+            : null,
       ),
     );
   }
@@ -906,12 +909,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildGreeting() {
-    final userName = widget.userProfile?.name ?? 'Usuário';
+    // Extrair apenas o primeiro nome
+    String firstName = 'Usuário';
+    if (widget.userProfile?.name != null && widget.userProfile!.name.isNotEmpty) {
+      final names = widget.userProfile!.name.trim().split(' ');
+      firstName = names[0];
+    }
+    
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0),
       child: Text(
-        'Olá, $userName! 👋',
-        style: Theme.of(context).textTheme.displaySmall?.copyWith(
+        'Olá, $firstName! 👋',
+        style: Theme.of(context).textTheme.headlineLarge?.copyWith(
               fontWeight: FontWeight.bold,
             ),
       ),
@@ -1143,6 +1152,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: Colors.orange,
                   progress: _carbsGoal > 0 ? (_carbs / _carbsGoal).clamp(0.0, 1.0) : 0.0,
                   goal: _carbsGoal > 0 ? '${_carbsGoal.toStringAsFixed(0)}g' : null,
+                  isMiddleCard: true,
                 ),
               ),
               const SizedBox(width: 16),
@@ -1170,9 +1180,13 @@ class _HomeScreenState extends State<HomeScreen> {
     required Color color,
     required double progress,
     String? goal,
+    bool isMiddleCard = false,
   }) {
     return Container(
-      padding: const EdgeInsets.all(16.0),
+      padding: EdgeInsets.symmetric(
+        horizontal: 16.0,
+        vertical: isMiddleCard ? 32.0 : 24.0, // Card do meio com mais padding vertical
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1185,11 +1199,13 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: color, size: 28),
-          const SizedBox(height: 8),
+          SizedBox(height: isMiddleCard ? 12 : 8), // Mais espaçamento no card do meio
           Text(
             value,
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -1199,21 +1215,23 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 4),
           Text(
             label,
-            style: Theme.of(context).textTheme.bodySmall,
             textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           if (goal != null) ...[
-            const SizedBox(height: 4),
+            SizedBox(height: isMiddleCard ? 6 : 4), // Mais espaçamento no card do meio
             Text(
               'Meta: $goal',
+              textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.grey.shade600,
                     fontSize: 10,
                   ),
-              textAlign: TextAlign.center,
             ),
           ],
-          const SizedBox(height: 8),
+          SizedBox(height: isMiddleCard ? 12 : 8), // Mais espaçamento no card do meio
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(

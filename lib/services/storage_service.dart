@@ -9,24 +9,67 @@ class StorageService {
 
   final FirebaseStorage _storage = FirebaseStorage.instance;
 
+  /// Detecta a extensão e contentType do arquivo de imagem
+  Map<String, String> _getImageMetadata(String filePath) {
+    final extension = filePath.split('.').last.toLowerCase();
+    
+    switch (extension) {
+      case 'jpg':
+      case 'jpeg':
+        return {'ext': 'jpg', 'contentType': 'image/jpeg'};
+      case 'png':
+        return {'ext': 'png', 'contentType': 'image/png'};
+      case 'heic':
+        return {'ext': 'heic', 'contentType': 'image/heic'};
+      case 'heif':
+        return {'ext': 'heif', 'contentType': 'image/heif'};
+      case 'webp':
+        return {'ext': 'webp', 'contentType': 'image/webp'};
+      default:
+        // Por padrão, usa jpg
+        return {'ext': 'jpg', 'contentType': 'image/jpeg'};
+    }
+  }
+
   /// Faz upload de uma foto de perfil e retorna a URL
   Future<String> uploadProfilePhoto({
     required String userId,
     required File imageFile,
   }) async {
     try {
-      // Criar referência no Storage
-      final String fileName = 'profile_${userId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      debugPrint('📤 Iniciando upload da foto para userId: $userId');
+
+      // Detectar formato da imagem
+      final metadata = _getImageMetadata(imageFile.path);
+      final extension = metadata['ext']!;
+      final contentType = metadata['contentType']!;
+      
+      debugPrint('🖼️ Formato detectado: $extension (contentType: $contentType)');
+
+      // Criar referência no Storage usando o userId do Firestore
+      final String fileName = 'profile_${userId}_${DateTime.now().millisecondsSinceEpoch}.$extension';
       final Reference storageRef = _storage.ref().child('profile_photos/$fileName');
+      
+      debugPrint('📁 Caminho do arquivo: profile_photos/$fileName');
+      
+      // Verificar tamanho do arquivo (máximo 5MB)
+      final fileSize = await imageFile.length();
+      const maxSize = 5 * 1024 * 1024; // 5MB
+      if (fileSize > maxSize) {
+        throw Exception('A foto é muito grande. Tamanho máximo: 5MB');
+      }
+      
+      debugPrint('📏 Tamanho do arquivo: ${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB');
 
       // Fazer upload
       final UploadTask uploadTask = storageRef.putFile(
         imageFile,
         SettableMetadata(
-          contentType: 'image/jpeg',
+          contentType: contentType,
           customMetadata: {
             'userId': userId,
             'uploadedAt': DateTime.now().toIso8601String(),
+            'originalFormat': extension,
           },
         ),
       );
